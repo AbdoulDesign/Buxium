@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { X } from "lucide-react";
 
-const ModalSortie = ({ show, onClose, onSave, sortie, marchandises }) => {
+const ModalSortie = ({ show, onClose, onSave, sortie, marchandises, boutique_id }) => {
   const [form, setForm] = useState({
     quantite: "",
     marchandise_id: "",
+    boutique: "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(""); // 👉 pour stocker les erreurs API
@@ -14,6 +15,7 @@ const ModalSortie = ({ show, onClose, onSave, sortie, marchandises }) => {
       setForm({
         quantite: sortie.quantite ?? "",
         marchandise_id: sortie.marchandise?.id ?? "",
+        boutique: boutique_id,
       });
     } else {
       setForm({ quantite: "", marchandise_id: "" });
@@ -37,7 +39,8 @@ const ModalSortie = ({ show, onClose, onSave, sortie, marchandises }) => {
       // Payload attendu par ton backend
       const payload = {
         quantite: Number(form.quantite),
-        marchandise_id: form.marchandise_id, // ⚠️ adapte si backend attend "marchandise"
+        marchandise_id: form.marchandise_id,
+        boutique: boutique_id,
       };
 
       await onSave(payload);
@@ -49,7 +52,7 @@ const ModalSortie = ({ show, onClose, onSave, sortie, marchandises }) => {
 
       // 👉 récupérer le message précis de l'API
       if (err.response && err.response.data) {
-        setError(err.response.data.detail || "Choisissez une marchandise avant d'enregistrer !");
+        setError(err.response.data.quantite || "Choisissez une marchandise avant d'enregistrer !");
       } else {
         setError("Erreur lors de l'enregistrement.");
       }
@@ -83,7 +86,7 @@ const ModalSortie = ({ show, onClose, onSave, sortie, marchandises }) => {
             <option value="">-- Choisir une marchandise --</option>
             {marchandises.map((m) => (
               <option key={m.id} value={m.id}>
-                {m.reference ? `${m.reference} — ${m.designation}` : m.designation}
+                {m.reference ? `${m.reference} — ${m.name}` : m.name}
               </option>
             ))}
           </select>
@@ -122,8 +125,8 @@ const ModalSortie = ({ show, onClose, onSave, sortie, marchandises }) => {
               {saving
                 ? "Enregistrement..."
                 : sortie
-                ? "Mettre à jour"
-                : "Ajouter"}
+                  ? "Mettre à jour"
+                  : "Ajouter"}
             </button>
           </div>
         </form>

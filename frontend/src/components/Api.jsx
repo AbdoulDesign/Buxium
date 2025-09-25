@@ -1,60 +1,106 @@
+// src/api.js
 import axios from "axios";
 
-const API_URL = "http://localhost:8000/api"; // ton API root
+const API_URL = "http://localhost:8000/api"; // base de tes URLs
 
-// Création d'une instance Axios
 const api = axios.create({
   baseURL: API_URL,
-  headers: {
-    "Content-Type": "application/json",
-  },
+  headers: { "Content-Type": "application/json" },
+  withCredentials: true, // important : envoie aussi le cookie HttpOnly (refresh_token)
 });
 
-// Intercepteur pour ajouter automatiquement le token
+let accessToken = null;
+export const setAccessToken = (token) => {
+  accessToken = token;
+};
+export const clearAccessToken = () => {
+  accessToken = null;
+};
+export const getAccessToken = () => accessToken;
+
+/* ---- Gestion du refresh (mutex + file d’attente) ---- */
+let isRefreshing = false;
+let subscribers = [];
+
+function subscribeTokenRefresh(cb) {
+  subscribers.push(cb);
+}
+function onRefreshed(newToken) {
+  subscribers.forEach((cb) => cb(newToken));
+  subscribers = [];
+}
+
+async function performRefresh() {
+  // Si déjà en cours de refresh, attendre que ça se termine
+  if (isRefreshing) {
+    return new Promise((resolve, reject) => {
+      subscribeTokenRefresh((token) => {
+        if (token) resolve(token);
+        else reject(new Error("Échec du refresh"));
+      });
+    });
+  }
+
+  isRefreshing = true;
+  try {
+    // Appel du endpoint refresh ; il lit le refresh_token depuis le cookie côté serveur
+    const res = await api.post("accounts/token/refresh/", {}, { withCredentials: true });
+    const newAccess = res.data.access;
+    setAccessToken(newAccess);
+    onRefreshed(newAccess);
+    return newAccess;
+  } catch (err) {
+    onRefreshed(null);
+    throw err;
+  } finally {
+    isRefreshing = false;
+  }
+}
+
+/* ---- Intercepteur des requêtes : attacher l’access token s’il existe ---- */
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("accessToken");
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+  if (accessToken) {
+    config.headers.Authorization = `Bearer ${accessToken}`;
   }
   return config;
 });
 
-// Intercepteur pour gérer le refresh token automatiquement
+/* ---- Intercepteur des réponses : en cas de 401, tenter un refresh une seule fois 
+        (sauf pour login/refresh/verify afin d’éviter les boucles) ---- */
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+    if (!originalRequest) return Promise.reject(error);
 
-    // Si 401 et pas déjà en train de refresh
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    const status = error.response?.status;
+
+    // ne pas tenter de refresh pour ces endpoints (évite la récursion infinie)
+    const skipRefreshFor = [
+      "accounts/token/refresh/",
+      "accounts/auth/login/",
+      "accounts/auth/verify/",
+    ];
+
+    // normaliser l’URL (peut être absolue ou relative)
+    const reqUrl = originalRequest.url ?? originalRequest;
+
+    const shouldSkip = skipRefreshFor.some(
+      (path) => reqUrl.endsWith(path) || reqUrl.includes(path)
+    );
+
+    if (status === 401 && !originalRequest._retry && !shouldSkip) {
       originalRequest._retry = true;
-
       try {
-        const refreshToken = localStorage.getItem("refreshToken");
-        if (!refreshToken) {
-          throw new Error("Refresh token manquant");
-        }
-
-        // Appel API pour régénérer un access token
-        const res = await axios.post(`${API_URL}/accounts/auth/refresh/`, {
-          refresh: refreshToken,
-        });
-
-        const newAccessToken = res.data.access;
-
-        // Sauvegarde du nouveau token
-        localStorage.setItem("accessToken", newAccessToken);
-
-        // Réessaie la requête initiale avec le nouveau token
-        originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+        const newToken = await performRefresh(); // lance le refresh (échoue si refresh invalide)
+        // attacher le nouveau token et rejouer la requête initiale
+        originalRequest.headers.Authorization = `Bearer ${newToken}`;
         return api(originalRequest);
-      } catch (refreshError) {
-        console.error("Refresh token invalide :", refreshError);
-        // Nettoyage + redirection login
-        localStorage.removeItem("accessToken");
-        localStorage.removeItem("refreshToken");
-        localStorage.removeItem("userData");
+      } catch (refreshErr) {
+        clearAccessToken();
+        // rediriger vers login (pas de boucle infinie)
         window.location.href = "/auth/login";
+        return Promise.reject(refreshErr);
       }
     }
 
@@ -62,30 +108,28 @@ api.interceptors.response.use(
   }
 );
 
-/**
- * Connexion utilisateur / entreprise
- */
+/* ---- Fonctions utilitaires ---- */
 export const login = async (username, password) => {
-  try {
-    const response = await api.post("/accounts/auth/login/", {
-      username,
-      password,
-    });
+  // login retourne access + user (le backend met en place le refresh cookie)
+  const res = await api.post(
+    "accounts/auth/login/",
+    { username, password },
+    { withCredentials: true }
+  );
+  // res.data contient { access: "...", user: {...} } car le serializer inclut l’utilisateur
+  const { access, user } = res.data;
+  if (access) setAccessToken(access);
+  return { access, user };
+};
 
-    const { access, refresh, ...infos } = response.data;
+export const attemptRefresh = async () => {
+  // tente de refresh (lecture du cookie côté serveur). retourne un nouveau access ou échoue
+  return performRefresh();
+};
 
-    // Stocker les tokens
-    localStorage.setItem("accessToken", access);
-    localStorage.setItem("refreshToken", refresh);
-
-    // Stocker infos utilisateur/entreprise
-    localStorage.setItem("userData", JSON.stringify(infos));
-
-    return response.data;
-  } catch (err) {
-    console.error("Erreur de connexion :", err.response?.data || err.message);
-    throw err;
-  }
+export const fetchMe = async () => {
+  const res = await api.get("accounts/auth/me/", { withCredentials: true });
+  return res.data;
 };
 
 export default api;

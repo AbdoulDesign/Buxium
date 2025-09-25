@@ -1,36 +1,64 @@
 import React, { useState, useEffect } from "react";
-import axios from "axios";
 import { FiX } from "react-icons/fi";
+import api from "../../../Api"; // <-- utilisation de ton api centralisé
 
-const API_BASE = "http://localhost:8000/api/gestion-stock";
-
-const NouvelleMarchandise = ({ existingData, onClose }) => {
-  const userData = JSON.parse(localStorage.getItem("userData"));
-  const entreprise_id = userData?.id;
+const NouvelleMarchandise = ({ existingData, onClose, boutique_id }) => {
   const [categories, setCategories] = useState([]);
   const [formData, setFormData] = useState({
-    designation: existingData?.designation || "",
+    reference: existingData?.reference || "",
+    name: existingData?.name || "",
     categorie: existingData?.categorie?.id || "",
     unite: existingData?.unite || "",
     seuil: existingData?.seuil || "",
     stock: existingData?.stock || "",
-    prix: existingData?.prix || "",
     prix_achat: existingData?.prix_achat || "",
     prix_vente: existingData?.prix_vente || "",
     image: null,
-    is_active: true,
-    entreprise: entreprise_id,
+    is_active: existingData?.is_active ?? true,
+    boutique: boutique_id,
   });
 
   const [imagePreview, setImagePreview] = useState(existingData?.image || null);
   const [loading, setLoading] = useState(false);
 
-  const unites = ["Pièce","Sachet","Sac","Carton","Caisse","Boîte","Bouteille","Bidon","Rouleau","Lot","Paquet","Tonne"];
+  const unites = [
+    "Pièce",
+    "Sachet",
+    "Sac",
+    "Carton",
+    "Caisse",
+    "Boîte",
+    "Bouteille",
+    "Bidon",
+    "Rouleau",
+    "Lot",
+    "Paquet",
+    "Tonne",
+  ];
 
+  // Récupérer catégories
   useEffect(() => {
-    axios.get(`${API_BASE}/categories/`).then((res) => setCategories(res.data));
+    const fetchCategories = async () => {
+      try {
+        const res = await api.get("/gestion_stock/categories/");
+        setCategories(res.data);
+      } catch (err) {
+        console.error(err);
+        alert("❌ Erreur lors du chargement des catégories");
+      }
+    };
+
+    fetchCategories();
   }, []);
 
+  useEffect(() => {
+  if (boutique_id) {
+    setFormData((prev) => ({ ...prev, boutique: boutique_id }));
+  }
+}, [boutique_id]);
+
+
+  // Gestion des champs
   const handleChange = (e) => {
     const { name, value, files } = e.target;
     if (name === "image") {
@@ -42,6 +70,7 @@ const NouvelleMarchandise = ({ existingData, onClose }) => {
     }
   };
 
+  // Soumission du formulaire
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -54,17 +83,20 @@ const NouvelleMarchandise = ({ existingData, onClose }) => {
       });
 
       if (existingData) {
-        await axios.put(`${API_BASE}/marchandises/${existingData.id}/`, data, {
+        // Update
+        await api.put(`/gestion_stock/marchandises/${existingData.id}/`, data, {
           headers: { "Content-Type": "multipart/form-data" },
         });
       } else {
-        await axios.post(`${API_BASE}/marchandises/`, data, {
+        // Create
+        await api.post(`/gestion_stock/marchandises/`, data, {
           headers: { "Content-Type": "multipart/form-data" },
         });
       }
 
       onClose();
     } catch (err) {
+      console.error(err);
       alert("❌ Erreur lors de l’enregistrement");
     } finally {
       setLoading(false);
@@ -85,8 +117,8 @@ const NouvelleMarchandise = ({ existingData, onClose }) => {
         <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <input
             type="text"
-            name="designation"
-            value={formData.designation}
+            name="name"
+            value={formData.name}
             onChange={handleChange}
             placeholder="Nom de marchandise"
             required
@@ -101,7 +133,7 @@ const NouvelleMarchandise = ({ existingData, onClose }) => {
           >
             <option value="">Choisir la categorie</option>
             {categories.map((c) => (
-              <option key={c.id} value={c.id}>{c.nom}</option>
+              <option key={c.id} value={c.id}>{c.label}</option>
             ))}
           </select>
           <select

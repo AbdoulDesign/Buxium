@@ -1,163 +1,238 @@
-from rest_framework import generics, status, viewsets
+from rest_framework import viewsets, status, generics
 from rest_framework.response import Response
-from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from .models import Entreprise, Utilisateur, Activite, Role, Plan, Subscription, Payment
-from .serializers import (
-    EntrepriseRegisterSerializer,
-    UtilisateurRegisterSerializer,
-    LoginSerializer, ActiviteSerializer, RoleSerializer,
-    SetNewPasswordSerializer, PlanSerializer, SubscriptionSerializer, PaymentSerializer
-)
 from rest_framework.decorators import action
-from rest_framework_simplejwt.tokens import RefreshToken, AccessToken
-from django.conf import settings
+from rest_framework.views import APIView
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework_simplejwt.views import TokenObtainPairView
+from .serializers import (
+    BoutiqueSerializer,
+    PersonnelSerializer,
+    CustomTokenObtainPairSerializer,
+    AdminSignupSerializer,
+    BoutiqueSignupSerializer,
+    PersonnelSignupSerializer,
+    UserSerializer,
+    ActiviteSerializer,
+    ProfilPersonnelSerializer,
+    PlanSerializer,
+    SubscriptionSerializer,
+    SetNewPasswordSerializer,
+    PersonnelUpdateSerializer,
+    UserMeSerializer,
+)
+from .permissions import IsAdmin, IsBoutique, IsPersonnel
+from .models import ( User, Boutique, Personnel, Activite, ProfilPersonnel,
+Plan, Subscription, Boutique, Personnel
+)
+from rest_framework_simplejwt.exceptions import TokenError
 from django.utils import timezone
-from datetime import timedelta 
-from rest_framework import permissions
+from django.db import transaction
+from datetime import timedelta
+from django.conf import settings
+from core.mixins import MultiTenantMixin
+from rest_framework_simplejwt.tokens import RefreshToken
+
+
+
+
+class UserViewSet(viewsets.ModelViewSet):
+    queryset = User.objects.all().order_by("-id")
+    serializer_class = UserSerializer
+    permission_classes = [IsAuthenticated]
+
+
+# ----- Login avec cookies sécurisés -----
+class CustomTokenObtainPairView(TokenObtainPairView):
+    serializer_class = CustomTokenObtainPairSerializer
+
+    def post(self, request, *args, **kwargs):
+        response = super().post(request, *args, **kwargs)
+
+        if response.status_code == 200:
+            data = response.data
+
+            # Déplacer refresh en HttpOnly cookie
+            response.set_cookie(
+                key="refresh_token",
+                value=data["refresh"],
+                httponly=True,
+                secure=not settings.DEBUG,
+                samesite="Lax",
+                max_age=7 * 24 * 60 * 60,
+            )
+
+            # Supprimer refresh du body
+            del data["refresh"]
+            response.data = data
+
+        return response
+
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def me(request):
+    serializer = UserMeSerializer(request.user)
+    return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class ActiviteViewSet(viewsets.ModelViewSet):
     queryset = Activite.objects.all()
     serializer_class = ActiviteSerializer
-    permission_classes = [AllowAny]
+    permission_classes = []
 
-class RoleViewSet(viewsets.ModelViewSet):
-    queryset = Role.objects.all()
-    serializer_class = RoleSerializer
+class ProfilPersonnelViewSet(viewsets.ModelViewSet):
+    queryset = ProfilPersonnel.objects.all()
+    serializer_class = ProfilPersonnelSerializer
     permission_classes = []
 
 
-class EntrepriseViewSet(viewsets.ModelViewSet):
-    queryset = Entreprise.objects.all()
-    serializer_class = EntrepriseRegisterSerializer
-    permission_classes = []
+# -----------------------
+# CRUD Boutique
+# -----------------------
+class BoutiqueViewSet(MultiTenantMixin, viewsets.ModelViewSet):
+    queryset = Boutique.objects.all()
+    serializer_class = BoutiqueSerializer
+    permission_classes = [IsAuthenticated]
 
     def get_permissions(self):
-        if self.action == 'create':  # POST
-            return [AllowAny()]
-        return [AllowAny()]  # GET, DELETE, PUT, PATCH nécessitent auth (je dois remettre 'IsAuthenticated', mais ca aussi je vais devoir enlever apres)
-
-    def get_queryset(self):
-        return self.queryset.filter(is_active=True)
+        if self.action in ["create", "update", "partial_update", "destroy"]:
+            return [IsAuthenticated(), IsBoutique()]
+        return [IsAuthenticated()]
 
 
     def destroy(self, request, *args, **kwargs):
-        """
-        Soft delete : désactive l'entreprise par défaut.
-        Hard delete : suppression définitive si ?hard=true.
-        """
         instance = self.get_object()
 
-        # Hard delete si ?hard=true
         if request.query_params.get("hard") == "true":
             instance.delete()
             return Response(
-                {"message": f"Entreprise '{instance.username}' supprimée définitivement"},
-                status=status.HTTP_204_NO_CONTENT,
+                {"message": f"Boutique '{instance.user.username}' supprimée définitivement"},
+                status=status.HTTP_200_OK,
             )
 
-        # Soft delete sinon
         instance.is_active = False
         instance.save(update_fields=["is_active"])
         return Response(
-            {"message": f"Entreprise '{instance.username}' désactivée"},
-            status=status.HTTP_204_NO_CONTENT,
+            {"message": f"Boutique '{instance.user.username}' désactivée"},
+            status=status.HTTP_200_OK,
         )
 
 
-    @action(detail=True, methods=["post"])
+    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated, IsAdmin])
     def restore(self, request, pk=None):
-        """Réactive une entreprise désactivée"""
         try:
-            instance = Entreprise.objects.get(pk=pk, is_active=False)
-        except Entreprise.DoesNotExist:
+            instance = Boutique.objects.get(pk=pk, is_active=False)
+        except Boutique.DoesNotExist:
             return Response(
-                {"error": "Cette entreprise n'existe pas ou est déjà active."},
+                {"error": "Cette boutique n'existe pas ou est déjà active."},
                 status=status.HTTP_404_NOT_FOUND,
             )
         instance.is_active = True
         instance.save(update_fields=["is_active"])
-        return Response({"message": f"Entreprise '{instance.username}' restaurée"})
+        return Response({"message": f"Boutique '{instance.user.username}' restaurée"})
 
 
     @action(detail=False, methods=["get"])
     def archived(self, request):
-        """Liste des entreprises désactivées"""
-        archived_items = Entreprise.objects.filter(is_active=False)
+        archived_items = Boutique.objects.filter(is_active=False)
         serializer = self.get_serializer(archived_items, many=True)
         return Response(serializer.data)
 
 
-    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
-    def set_password(self, request, pk=None):
-        entreprise = self.get_object()
-        serializer = SetNewPasswordSerializer(
-            data=request.data,
-            context={'user': entreprise}
-        )
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
+# -----------------------
+# CRUD Personnel
+# -----------------------
+
+class PersonnelViewSet(MultiTenantMixin, viewsets.ModelViewSet):
+    queryset = Personnel.objects.all()
+    serializer_class = PersonnelSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_serializer_class(self):
+        if self.action in ["update", "partial_update"]:
+            return PersonnelUpdateSerializer
+        if self.action == "create":
+            return PersonnelSignupSerializer
+        return PersonnelSerializer
+
+    def update(self, request, *args, **kwargs):
+        # on utilise le serializer Update pour valider et sauvegarder
+        super().update(request, *args, **kwargs)
+        # puis on renvoie l'objet avec le serializer principal (avec user inclus)
+        instance = self.get_object()
         return Response(
-            {"message": "Mot de passe changé avec succès."},
-            status=status.HTTP_200_OK
+            PersonnelSerializer(instance, context=self.get_serializer_context()).data
         )
 
+    def get_permissions(self):
+        if self.action in ["create", "update", "partial_update", "destroy"]:
+            return [IsAuthenticated(), IsBoutique()]
+        return [IsAuthenticated()]
 
-class UtilisateurViewSet(viewsets.ModelViewSet):
-    queryset = Utilisateur.objects.all()
-    serializer_class = UtilisateurRegisterSerializer
-    permission_classes = [AllowAny]
 
-    def get_queryset(self):
-        return self.queryset.filter(is_active=True)
+    def create(self, request, *args, **kwargs):
+        user = request.user
+        if user.role != "boutique":
+            return Response(
+                {"detail": "Seules les boutiques peuvent créer du personnel."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        data = request.data.copy()
+        data["boutique"] = user.boutique_profil.id
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
         
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
-        
-        # Hard delete si ?hard=true
+
         if request.query_params.get("hard") == "true":
             instance.delete()
             return Response(
-                {"message": f"Utilisateur '{instance.username}' supprimée définitivement"},
-                status=status.HTTP_204_NO_CONTENT,
+                {"message": f"Personnel '{instance.user.username}' supprimé définitivement"},
+                status=status.HTTP_200_OK,
             )
-            
-            # Soft delete sinon
+
         instance.is_active = False
         instance.save(update_fields=["is_active"])
         return Response(
-            {"message": f"Utilisateur '{instance.username}' désactivé"},
-            status=status.HTTP_204_NO_CONTENT,
+            {"message": f"Personnel '{instance.user.username}' désactivé"},
+            status=status.HTTP_200_OK,
         )
 
-    @action(detail=True, methods=["post"])
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated, IsAdmin])
     def restore(self, request, pk=None):
         try:
-            instance = Utilisateur.objects.get(pk=pk, is_active=False)
-        except Utilisateur.DoesNotExist:
+            instance = Personnel.objects.get(pk=pk, is_active=False)
+        except Personnel.DoesNotExist:
             return Response(
-                {"error": "Cet utilisateur n'existe pas ou est déjà actif."},
+                {"error": "Ce personnel n'existe pas ou est déjà actif."},
                 status=status.HTTP_404_NOT_FOUND,
             )
         instance.is_active = True
         instance.save(update_fields=["is_active"])
-        return Response({"message": f"Utilisateur '{instance.username}' restauré"})
+        return Response({"message": f"Personnel '{instance.user.username}' restauré"})
 
 
     @action(detail=False, methods=["get"])
     def archived(self, request):
-        archived_items = Utilisateur.objects.filter(is_active=False)
+        archived_items = Personnel.objects.filter(is_active=False)
         serializer = self.get_serializer(archived_items, many=True)
         return Response(serializer.data)
     
 
-    @action(detail=True, methods=['post'], permission_classes=[])
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
     def set_password(self, request, pk=None):
-        utilisateur = self.get_object()
+        personnel = self.get_object()
         serializer = SetNewPasswordSerializer(
             data=request.data,
-            context={'user': utilisateur}
+            context={'user': personnel.user}  # ⚠️ passer l'objet User
         )
         serializer.is_valid(raise_exception=True)
         serializer.save()
@@ -166,80 +241,38 @@ class UtilisateurViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK
         )
 
+# -----------------------
+# Signup API
+# -----------------------
+
+# ---- Signup Admin ----
+class AdminSignupView(generics.CreateAPIView):
+    serializer_class = AdminSignupSerializer
+    permission_classes = []  # Seul un admin peut créer un autre admin
 
 
-# --- Login commun (Entreprise ou Utilisateur) ---
-class LoginView(APIView):
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        serializer = LoginSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        username = serializer.validated_data["username"]
-        password = serializer.validated_data["password"]
-
-        # --- Vérifie si c’est une entreprise ---
-        entreprise = Entreprise.objects.filter(username=username, is_active=True).first()
-        if entreprise and entreprise.check_password(password):
-            # Création d'un refresh token "custom" pour l'entreprise
-            refresh = RefreshToken()
-            refresh["type"] = "entreprise"
-            refresh["entreprise_id"] = entreprise.id
-            refresh["username"] = entreprise.username
-
-            access = refresh.access_token
-            activite_data = ActiviteSerializer(entreprise.activite).data if entreprise.activite else None
-
-            return Response({
-                "id": entreprise.id,
-                "username": entreprise.username,
-                "nom": entreprise.nom,
-                "type": "entreprise",
-                "activite": activite_data,
-                "refresh": str(refresh),
-                "access": str(access),
-            }, status=status.HTTP_200_OK)
-
-        # --- Vérifie si c’est un utilisateur ---
-        user = Utilisateur.objects.filter(username=username, is_active=True).first()
-        if user and user.check_password(password):
-            refresh = RefreshToken.for_user(user)
-            role_data = RoleSerializer(user.role).data if user.role else None
-
-            return Response({
-                "id": user.id,
-                "username": user.username,
-                "nom": user.nom,
-                "role": role_data,
-                "entreprise": user.entreprise.id if user.entreprise else None,
-                "type": "utilisateur",
-                "refresh": str(refresh),
-                "access": str(refresh.access_token),
-            }, status=status.HTTP_200_OK)
-
-        return Response({"detail": "Identifiants invalides"}, status=status.HTTP_401_UNAUTHORIZED)
+# ---- Signup Boutique ----
+class BoutiqueSignupView(generics.CreateAPIView):
+    serializer_class = BoutiqueSignupSerializer
+    permission_classes = []  # ✅ la création d'une boutique est public
 
 
-# --- Endpoint /refresh/ ---
-class RefreshTokenView(APIView):
-    permission_classes = [permissions.AllowAny]
+class PersonnelSignupView(generics.CreateAPIView):
+    serializer_class = PersonnelSignupSerializer
+    permission_classes = [IsAuthenticated, IsBoutique]
 
-    def post(self, request):
-        refresh_token = request.data.get("refresh")
-        if not refresh_token:
-            return Response({"detail": "Refresh token manquant"}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            refresh = RefreshToken(refresh_token)
-            new_access = refresh.access_token
-            return Response({"access": str(new_access)}, status=status.HTTP_200_OK)
-        except Exception:
-            return Response({"detail": "Refresh token invalide ou expiré"}, status=status.HTTP_401_UNAUTHORIZED)
+    def perform_create(self, serializer):
+        # Si l'utilisateur connecté est une boutique, on utilise sa boutique
+        if hasattr(self.request.user, 'boutique_profil'):
+            serializer.save(boutique=self.request.user.boutique_profil)
+        else:
+            # Sinon, on utilise la boutique passée dans les données
+            # Le serializer gérera déjà cela via le champ boutique_id
+            serializer.save()
 
 
 class CurrencyView(APIView):
-    permission_classes = []
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         """
@@ -261,8 +294,6 @@ class CurrencyView(APIView):
         return Response({"currency": currency})
 
 
-
-
 # -------- Plans disponibles --------
 class PlanViewSet(viewsets.ModelViewSet):
     queryset = Plan.objects.all()
@@ -271,55 +302,131 @@ class PlanViewSet(viewsets.ModelViewSet):
 
 
 # -------- Abonnement --------
-class SubscriptionViewSet(viewsets.ModelViewSet):
+class SubscriptionViewSet(MultiTenantMixin, viewsets.ModelViewSet):
     queryset = Subscription.objects.all()
     serializer_class = SubscriptionSerializer
-    permission_classes = []
-
-    @action(detail=False, methods=["get"])
-    def my_subscription(self, request):
-        """Retourne l’abonnement de l’entreprise connectée"""
-        entreprise = request.user  # car Entreprise est ton AUTH_USER_MODEL
-        subscription = Subscription.objects.filter(entreprise=entreprise).first()
-        if not subscription:
-            return Response({"detail": "Pas d’abonnement actif"}, status=status.HTTP_404_NOT_FOUND)
-        serializer = self.get_serializer(subscription)
-        return Response(serializer.data)
-
-
-# -------- Paiements --------
-class PaymentViewSet(viewsets.ModelViewSet):
-    queryset = Payment.objects.all()
-    serializer_class = PaymentSerializer
-    permission_classes = []
+    permission_classes = [IsAuthenticated]
 
     def create(self, request, *args, **kwargs):
-        """
-        Lorsqu’un paiement est effectué :
-        - Enregistre le paiement
-        - Met à jour ou crée l’abonnement
-        """
+        user = request.user
+        if user.role != "boutique":
+            return Response(
+                {"detail": "Seules les boutiques peuvent souscrire."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        boutique = user.boutique_profil
+        plan_id = request.data.get("plan")
+        if not plan_id:
+            return Response({"detail": "Plan requis."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            plan = Plan.objects.get(id=plan_id)
+        except Plan.DoesNotExist:
+            return Response({"detail": "Plan introuvable."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Vérifier s'il existe un abonnement non expiré (actif ou en attente d'expiration)
+        non_expired_sub = Subscription.objects.filter(
+            boutique=boutique
+        ).exclude(
+            status=Subscription.STATUS_EXPIRED
+        ).exclude(
+            status=Subscription.STATUS_CANCELLED
+        ).first()
+
+        if non_expired_sub:
+            # Vérifier si l'abonnement est toujours actif (non expiré)
+            if non_expired_sub.is_active():
+                # Abonnement actif trouvé
+                if non_expired_sub.plan.name.lower() == "gratuit":
+                    # Gratuit actif → autorisé seulement si le nouveau plan est payant
+                    if plan.name.lower() == "gratuit":
+                        return Response(
+                            {"detail": "L'abonnement gratuit n'est utilisable qu'une seule fois."},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+                    # Gratuit actif → peut aller vers Payant
+                else:
+                    # 🔒 Abonnement payant encore actif → interdiction totale
+                    return Response(
+                        {"detail": "Il y a un abonnement payant en cours pour cette boutique. "
+                                "Attendez la fin de l'abonnement actuel avant de souscrire à nouveau."},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            else:
+                # Abonnement non expiré mais inactif (en transition)
+                return Response(
+                    {"detail": "Un abonnement est en cours de traitement. Veuillez attendre qu'il soit complètement expiré."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        # Vérifier si le gratuit a déjà été utilisé dans le passé
+        if plan.name.lower() == "gratuit":
+            if Subscription.objects.filter(
+                boutique=boutique,
+                plan__name__iexact="gratuit"
+            ).exists():
+                return Response(
+                    {"detail": "L'abonnement gratuit n'est utilisable qu'une seule fois."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        # ✅ Créer la nouvelle souscription
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        payment = serializer.save()
+        serializer.save(boutique=boutique, plan=plan)
 
-        # Mettre à jour l’abonnement
-        plan = payment.plan
-        entreprise = payment.entreprise
-        subscription, created = Subscription.objects.get_or_create(entreprise=entreprise)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-        subscription.plan = plan
-        subscription.start_date = timezone.now()
-        subscription.end_date = subscription.start_date + timedelta(days=plan.duration_days)
-        subscription.is_active = True
-        subscription.save()
 
-        headers = self.get_success_headers(serializer.data)
+
+@api_view(["POST"])
+@permission_classes([])
+def cookie_refresh(request):
+    """
+    Rafraîchir le token d'accès avec gestion d'erreur améliorée
+    """
+    refresh_token = request.COOKIES.get("refresh_token")
+    
+    if not refresh_token:
         return Response(
-            {
-                "payment": PaymentSerializer(payment).data,
-                "subscription": SubscriptionSerializer(subscription).data,
-            },
-            status=status.HTTP_201_CREATED,
-            headers=headers,
+            {"detail": "Refresh token not found in cookies."}, 
+            status=status.HTTP_401_UNAUTHORIZED
         )
+    
+    try:
+        # Vérifier si le token est valide
+        refresh = RefreshToken(refresh_token)
+        
+        # Vérifier l'expiration
+        from django.utils import timezone
+        from datetime import datetime
+        
+        if refresh.payload.get('exp', 0) < timezone.now().timestamp():
+            return Response(
+                {"detail": "Refresh token expired."}, 
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+            
+        data = {"access": str(refresh.access_token)}
+        return Response(data, status=status.HTTP_200_OK)
+        
+    except TokenError as e:
+        return Response(
+            {"detail": f"Invalid refresh token: {str(e)}"}, 
+            status=status.HTTP_401_UNAUTHORIZED
+        )
+    except Exception as e:
+        return Response(
+            {"detail": "Unexpected error during token refresh."}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def logout_view(request):
+    response = Response({"detail": "Déconnecté avec succès"})
+    # Supprimer le cookie refresh_token (httpOnly)
+    response.delete_cookie("refresh_token", samesite="Lax")
+    return response

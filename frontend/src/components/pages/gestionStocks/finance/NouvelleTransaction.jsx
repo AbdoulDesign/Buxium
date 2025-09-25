@@ -1,22 +1,34 @@
 import React, { useState } from "react";
 import { Button } from "../../../ui";
 
-export default function NouvelleTransaction({ onAdd, onClose }) {
+export default function NouvelleTransaction({ onAdd, onClose, boutique_id }) {
   const [form, setForm] = useState({
     type: "revenu",
     description: "",
-    categorie: "",
     montant: "",
   });
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    onAdd(form);
-    setForm({ type: "revenu", description: "", categorie: "", montant: "" });
+
+    // ⚡ Ajouter l'ID de la boutique automatiquement
+    const payload = {
+      ...form,
+      boutique: boutique_id,
+    };
+
+    onAdd(payload);
+
+    // Réinitialiser le formulaire
+    setForm({
+      type: "revenu",
+      description: "",
+      montant: "",
+    });
   };
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-40 z-50">
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl shadow-lg w-full max-w-md p-6">
         <h2 className="text-lg font-bold mb-4">Ajouter une Transaction</h2>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -33,14 +45,6 @@ export default function NouvelleTransaction({ onAdd, onClose }) {
             placeholder="Description"
             value={form.description}
             onChange={(e) => setForm({ ...form, description: e.target.value })}
-            className="w-full border rounded p-2"
-            required
-          />
-          <input
-            type="text"
-            placeholder="Catégorie"
-            value={form.categorie}
-            onChange={(e) => setForm({ ...form, categorie: e.target.value })}
             className="w-full border rounded p-2"
             required
           />

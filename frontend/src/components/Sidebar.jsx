@@ -1,23 +1,15 @@
+// src/components/layout/Sidebar.jsx
 import React, { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
+import { useAuth } from "../hooks/useAuth";
 
-const Sidebar = ({ menuOpen, setMenuOpen, activeLink, setActiveLink }) => {
+const Sidebar = ({ menuOpen, setMenuOpen, activeLink, setActiveLink, signout }) => {
   const [showLogoutPopup, setShowLogoutPopup] = useState(false);
-  const navigate = useNavigate();
+  const { signout } = useAuth(); // ✅ on récupère signout depuis le contexte
 
   const handleLinkClick = (path) => {
     setActiveLink(path);
     setMenuOpen(false);
-  };
-
-  const handleLogout = () => {
-    // Supprimer les infos de session
-    localStorage.removeItem("accessToken");
-    localStorage.removeItem("refreshToken");
-    localStorage.removeItem("userData");
-
-    setShowLogoutPopup(false);
-    navigate("/auth/login"); // redirection vers login
   };
 
   return (
@@ -184,7 +176,10 @@ const Sidebar = ({ menuOpen, setMenuOpen, activeLink, setActiveLink }) => {
                 Annuler
               </button>
               <button
-                onClick={handleLogout}
+                onClick={() => {
+                  setShowLogoutPopup(false);
+                  signout();
+                }}
                 className="px-4 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white"
               >
                 Oui, déconnecter

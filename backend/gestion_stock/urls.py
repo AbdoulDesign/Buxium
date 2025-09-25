@@ -33,10 +33,6 @@ urlpatterns = [
 Nouvelles routes générées automatiquement par DRF Router :
 - GET    /marchandises/archived/       → liste des marchandises désactivées
 - POST   /marchandises/{id}/restore/   → restaurer une marchandise
-- GET    /entrees/archived/            → liste des entrées désactivées
-- POST   /entrees/{id}/restore/        → restaurer une entrée
-- GET    /sorties/archived/            → liste des sorties désactivées
-- POST   /sorties/{id}/restore/        → restaurer une sortie
 - GET    /transactions/archived/            
 - POST   /transactions/{id}/restore/       
 """

@@ -1,5 +1,5 @@
+// 📂 src/components/Analyse/RapportAnalyse.jsx
 import React, { useState, useEffect } from "react";
-import axios from "axios";
 import { motion } from "framer-motion";
 import {
   BarChart,
@@ -19,9 +19,9 @@ import {
   ArrowDownCircle,
   Package,
   Star,
-  AlertTriangle,
 } from "lucide-react";
 import { BiBarChart } from "react-icons/bi";
+import api from "../../../Api";
 
 // ----- Composant carte statistique -----
 const StatCard = ({ icon: Icon, label, value, color }) => (
@@ -94,25 +94,19 @@ const getStatsForTab = (tab, data, currency) => {
 
 // ----- Composant principal Tableau de bord -----
 const RapportAnalyse = () => {
-  const userData = JSON.parse(localStorage.getItem("userData"));
-  const entreprise_id = userData?.id;
   const [activeTab, setActiveTab] = useState("marchandises");
   const [data, setData] = useState(null);
   const [currency, setCurrency] = useState("FCFA");
-  
 
   useEffect(() => {
-    axios
-      .get("http://localhost:8000/api/accounts/currency/", { withCredentials: true })
-      .then((res) => {
-        setCurrency(res.data.currency);
-      })
-      .catch((err) => {
-        console.error(err);
-      });
-    fetch(`http://localhost:8000/api/gestion-stock/rapport/?entreprise=${entreprise_id}`)
-      .then((res) => res.json())
-      .then((json) => setData(json))
+    api
+      .get("/accounts/currency/", { withCredentials: true })
+      .then((res) => setCurrency(res.data.currency))
+      .catch((err) => console.error(err));
+
+    api
+      .get("/gestion_stock/rapport/")
+      .then((res) => setData(res.data))
       .catch((err) => console.error("Erreur API :", err));
   }, []);
 
@@ -127,7 +121,7 @@ const RapportAnalyse = () => {
   const stats = getStatsForTab(activeTab, data, currency);
 
   return (
-    <div className="p-6 bg-gray-50 rounded-t-2xl min-h-screen">
+    <div className="md:p-6 p-3 bg-gray-50 rounded-t-2xl min-h-screen">
       <h1 className="text-3xl font-bold mb-6 flex items-center gap-2">
         <BiBarChart className="text-[#43AB8A]" /> Analyse des données
       </h1>
@@ -160,13 +154,13 @@ const RapportAnalyse = () => {
       </div>
 
       {/* Graphique */}
-      <motion.div whileHover={{ scale: 1.01 }} className="bg-white shadow-lg rounded-2xl p-6">
+      <motion.div whileHover={{ scale: 1.01 }} className="bg-white shadow-lg rounded-2xl p-1 md:p-6">
         <h2 className="text-lg font-semibold mb-4">{stats.chartTitle}</h2>
         <ResponsiveContainer width="100%" height={400}>
           {stats.chartType === "bar" ? (
             <BarChart data={stats.chartData}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="month" />
+              <XAxis dataKey="month" interval={0} angle={-30} textAnchor="end" />
               <YAxis />
               <Tooltip formatter={(val) => [`${val}`, "Nombre"]} />
               <Bar dataKey="value" fill="#43AB8A" radius={[6, 6, 0, 0]} />
@@ -174,7 +168,7 @@ const RapportAnalyse = () => {
           ) : (
             <LineChart data={stats.chartData}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="month" />
+              <XAxis dataKey="month" interval={0} angle={-30} textAnchor="end"/>
               <YAxis />
               <Tooltip formatter={(val) => [`${val}`, "Nombre"]} />
               <Line type="monotone" dataKey="value" stroke="#ef4444" strokeWidth={3} dot={{ r: 6 }} />

@@ -29,9 +29,9 @@ const FournisseurModal = ({
             </label>
             <input
               type="text"
-              value={newFournisseur.nom}
+              value={newFournisseur.name}
               onChange={(e) =>
-                setNewFournisseur({ ...newFournisseur, nom: e.target.value })
+                setNewFournisseur({ ...newFournisseur, name: e.target.value })
               }
               className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#43AB8A] focus:outline-none dark:bg-gray-800 dark:border-gray-700 dark:text-white"
               placeholder="Ex: Société X"
@@ -110,7 +110,7 @@ const FournisseurModal = ({
             >
               {marchandises.map((m) => (
                 <option key={m.id} value={m.id}>
-                  ({m.reference}) — {m.designation}
+                  ({m.reference}) — {m.name}
                 </option>
               ))}
             </select>

@@ -15,7 +15,6 @@ from .serializers import (
     CategorieSerializer, MarchandiseSerializer, EntreeSerializer,
     SortieSerializer, FournisseurSerializer, TransactionSerializer,
     EntreeLightSerializer, SortieLightSerializer, TransactionSimpleSerializer
-
 )
 from django.utils import timezone
 from rest_framework import status
@@ -25,25 +24,29 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import ValidationError
 import datetime
-from accounts.permissions import HasActiveSubscription
 from django.db.models.functions import ExtractWeekDay
+from accounts.permissions import IsAdmin, IsBoutique, IsPersonnel
+from accounts.models import Boutique
+from rest_framework import serializers
+from core.mixins import MultiTenantMixin
+from utils.tenants import filter_by_tenant
 
 
 
-
-class MarchandiseViewSet(viewsets.ModelViewSet):
-    queryset = Marchandise.objects.filter(is_active=True)  # on ne retourne que les actifs
+class MarchandiseViewSet(MultiTenantMixin, viewsets.ModelViewSet):
+    queryset = Marchandise.objects.all().order_by("-created_at")
     serializer_class = MarchandiseSerializer
-    permission_classes = []
+    permission_classes = [IsAuthenticated]
 
-    def get_queryset(self):
-        qs = Marchandise.objects.filter(is_active=True).select_related("categorie", "entreprise")
+    def perform_create(self, serializer):
+        user = self.request.user
 
-        entreprise_id = self.request.query_params.get("entreprise")
-        if entreprise_id:
-            qs = qs.filter(entreprise_id=entreprise_id)
-
-        return qs
+        if user.role == "boutique":
+            serializer.save(boutique=user.boutique_profil)
+        elif user.role == "personnel":
+            serializer.save(boutique=user.personnel_profil.boutique)
+        else:
+            raise PermissionDenied("Vous ne pouvez pas créer de marchandise.")
 
 
     def destroy(self, request, *args, **kwargs):
@@ -53,7 +56,7 @@ class MarchandiseViewSet(viewsets.ModelViewSet):
         if request.query_params.get("hard") == "true":
             instance.delete()  # suppression définitive
             return Response(
-                {"message": f"Marchandise {instance.designation} supprimée définitivement"},
+                {"message": f"Marchandise {instance.name} supprimée définitivement"},
                 status=status.HTTP_204_NO_CONTENT,
             )
 
@@ -61,7 +64,7 @@ class MarchandiseViewSet(viewsets.ModelViewSet):
         instance.is_active = False
         instance.save(update_fields=["is_active"])
         return Response(
-            {"message": f"Marchandise {instance.designation} désactivée"},
+            {"message": f"Marchandise {instance.name} désactivée"},
             status=status.HTTP_204_NO_CONTENT,
         )
 
@@ -80,7 +83,7 @@ class MarchandiseViewSet(viewsets.ModelViewSet):
         instance.is_active = True
         instance.save(update_fields=["is_active"])
         return Response(
-            {"message": f"Marchandise '{instance.designation}' restaurée"},
+            {"message": f"Marchandise '{instance.name}' restaurée"},
             status=status.HTTP_200_OK,
         )
 
@@ -101,9 +104,9 @@ class MarchandiseViewSet(viewsets.ModelViewSet):
         writer.writerow(["ID", "Référence", "Désignation", "Unité", "Seuil", "Stock", "Prix", "Catégorie"])
         for m in self.get_queryset():
             writer.writerow([
-                m.id, m.reference, m.designation, m.unite,
-                m.seuil, m.stock, m.prix,
-                m.categorie.nom if m.categorie else ""
+                m.id, m.reference, m.name, m.unite,
+                m.seuil, m.stock, m.prix_vente,
+                m.categorie.name if m.categorie else ""
             ])
         return response
 
@@ -111,7 +114,7 @@ class MarchandiseViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"])
     def export_excel(self, request):
         marchandises = self.get_queryset().values(
-            "id", "reference", "designation", "unite", "seuil", "stock", "prix", "categorie__nom"
+            "id", "reference", "name", "unite", "seuil", "stock", "prix de vente", "categorie__name"
         )
         df = pd.DataFrame(list(marchandises))
         output = io.BytesIO()
@@ -137,7 +140,7 @@ class MarchandiseViewSet(viewsets.ModelViewSet):
 
         y = 760
         for m in self.get_queryset():
-            line = f"{m.reference} - {m.designation} | Stock: {m.stock} | Prix: {m.prix} CFA"
+            line = f"{m.reference} - {m.name} | Stock: {m.stock} | Prix de vente: {m.prix_vente} CFA"
             p.setFont("Helvetica", 10)
             p.drawString(50, y, line)
             y -= 20
@@ -151,81 +154,37 @@ class MarchandiseViewSet(viewsets.ModelViewSet):
 
 
 # --------- Entree ----------
-class EntreeViewSet(viewsets.ModelViewSet):
-    queryset = Entree.objects.filter(marchandise__is_active=True)
+class EntreeViewSet(MultiTenantMixin, viewsets.ModelViewSet):
+    queryset = Entree.objects.all().order_by("-created_at")
     serializer_class = EntreeSerializer
-    permission_classes = []
-
+    permission_classes = [IsAuthenticated]
 
     def perform_create(self, serializer):
+        user = self.request.user
         marchandise = serializer.validated_data["marchandise"]
+
+        # 🚨 Vérification de cohérence boutique
+        boutique = None
+        if user.role == "boutique":
+            boutique = user.boutique_profil
+        elif user.role == "personnel" and hasattr(user, "personnel_profil"):
+            boutique = user.personnel_profil.boutique
+
+        if boutique and marchandise.boutique != boutique:
+            raise serializers.ValidationError(
+                "Vous ne pouvez pas ajouter une entrée pour une marchandise d'une autre boutique ❌."
+            )
+
         quantite = serializer.validated_data["quantite"]
 
-        # Snapshot
         serializer.save(
-            designation=marchandise.designation,
+            boutique=marchandise.boutique,   # ✅ ici on fixe la boutique
+            name=marchandise.name,
             prix_unitaire=marchandise.prix_achat,
             total=quantite * marchandise.prix_achat,
             created_at=timezone.now(),
         )
 
-    def get_queryset(self):
-        qs = Entree.objects.filter(marchandise__is_active=True).select_related(
-            "marchandise__categorie", "marchandise__entreprise"
-        )
-        entreprise_id = self.request.query_params.get("entreprise")
-        if entreprise_id:
-            try:
-                entreprise_id = int(entreprise_id)
-                qs = qs.filter(marchandise__entreprise_id=entreprise_id)
-            except ValueError:
-                return qs.none()
-        return qs
-
-
-    def destroy(self, request, *args, **kwargs):
-        instance = self.get_object()
-
-        # Vérifie si le paramètre ?hard=true est passé
-        if request.query_params.get("hard") == "true":
-            instance.delete()  # suppression définitive
-            return Response(
-                {"message": f"Entrée #{instance.id} supprimée définitivement"},
-                status=status.HTTP_204_NO_CONTENT,
-            )
-
-        # Sinon soft delete
-        instance.is_active = False
-        instance.save(update_fields=["is_active"])
-        return Response(
-            {"message": f"Entrée #{instance.id} désactivée"},
-            status=status.HTTP_204_NO_CONTENT,
-        )
-
-
-
-    @action(detail=False, methods=["get"], url_path="archived")
-    def archived(self, request):
-        archived_items = Entree.objects.filter(marchandise__is_active=False)
-        serializer = self.get_serializer(archived_items, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
-
-    @action(detail=True, methods=["post"], url_path="restore")
-    def restore(self, request, pk=None):
-        try:
-            instance = Entree.objects.get(pk=pk, marchandise__is_active=False)
-        except Entree.DoesNotExist:
-            return Response(
-                {"error": "Cette entrée n'existe pas ou est déjà active."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        instance.is_active = True
-        instance.save(update_fields=["is_active"])
-        return Response(
-            {"message": f"Entrée #{instance.id} restaurée"},
-            status=status.HTTP_200_OK,
-        )
 
 
     @action(detail=False, methods=["get"])
@@ -235,12 +194,12 @@ class EntreeViewSet(viewsets.ModelViewSet):
         writer = csv.writer(response)
         writer.writerow(["ID", "Marchandise", "Quantité"])
         for e in self.get_queryset():
-            writer.writerow([e.id, e.marchandise.designation, e.quantite])
+            writer.writerow([e.id, e.marchandise.name, e.quantite])
         return response
 
     @action(detail=False, methods=["get"])
     def export_excel(self, request):
-        df = pd.DataFrame(list(self.get_queryset().values("id", "marchandise__designation", "quantite")))
+        df = pd.DataFrame(list(self.get_queryset().values("id", "marchandise__name", "quantite")))
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
             df.to_excel(writer, index=False, sheet_name="Entrees")
@@ -261,7 +220,7 @@ class EntreeViewSet(viewsets.ModelViewSet):
         p.setFont("Helvetica", 12)
         y -= 30
         for e in self.get_queryset():
-            line = f"ID: {e.id} | Marchandise: {e.marchandise.designation} | Quantité: {e.quantite}"
+            line = f"ID: {e.id} | Marchandise: {e.marchandise.name} | Quantité: {e.quantite}"
             p.drawString(50, y, line)
             y -= 20
             if y < 50:
@@ -271,85 +230,35 @@ class EntreeViewSet(viewsets.ModelViewSet):
         return response
 
 # --------- Sortie ----------
-class SortieViewSet(viewsets.ModelViewSet):
-    queryset = Sortie.objects.filter(marchandise__is_active=True)
+class SortieViewSet(MultiTenantMixin, viewsets.ModelViewSet):
+    queryset = Sortie.objects.filter(marchandise__is_active=True).order_by("-created_at")
     serializer_class = SortieSerializer
-    permission_classes = []
-
+    permission_classes = [IsAuthenticated]
 
     def perform_create(self, serializer):
+        user = self.request.user
         marchandise = serializer.validated_data["marchandise"]
+
+        # 🚨 Vérification de cohérence boutique
+        boutique = None
+        if user.role == "boutique":
+            boutique = user.boutique_profil
+        elif user.role == "personnel" and hasattr(user, "personnel_profil"):
+            boutique = user.personnel_profil.boutique
+
+        if boutique and marchandise.boutique != boutique:
+            raise serializers.ValidationError(
+                "Vous ne pouvez pas ajouter une sortie pour une marchandise d'une autre boutique ❌."
+            )
+
         quantite = serializer.validated_data["quantite"]
 
-        try:
-            # Snapshot
-            serializer.save(
-                designation=marchandise.designation,
-                prix_unitaire=marchandise.prix_vente,
-                total=quantite * marchandise.prix_vente,
-                created_at=timezone.now(),
-            )
-        except ValueError as e:
-            # Transforme ton ValueError en ValidationError REST
-            raise ValidationError({"detail": str(e)})
-
-
-    def get_queryset(self):
-        qs = Sortie.objects.filter(marchandise__is_active=True).select_related(
-            "marchandise__categorie", "marchandise__entreprise"
-        )
-        entreprise_id = self.request.query_params.get("entreprise")
-        if entreprise_id:
-            try:
-                entreprise_id = int(entreprise_id)
-                qs = qs.filter(marchandise__entreprise_id=entreprise_id)
-            except ValueError:
-                return qs.none()
-        return qs
-
-
-    
-    def destroy(self, request, *args, **kwargs):
-        instance = self.get_object()
-
-        # Si ?hard=true alors suppression définitive
-        if request.query_params.get("hard") == "true":
-            instance.delete()
-            return Response(
-                {"message": f"Sortie #{instance.id} supprimée définitivement"},
-                status=status.HTTP_204_NO_CONTENT,
-            )
-
-        # Sinon soft delete
-        instance.is_active = False
-        instance.save(update_fields=["is_active"])
-        return Response(
-            {"message": f"Sortie #{instance.id} désactivée"},
-            status=status.HTTP_204_NO_CONTENT,
-        )
-
-
-    @action(detail=False, methods=["get"], url_path="archived")
-    def archived(self, request):
-        archived_items = Sortie.objects.filter(marchandise__is_active=False)
-        serializer = self.get_serializer(archived_items, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
-
-    @action(detail=True, methods=["post"], url_path="restore")
-    def restore(self, request, pk=None):
-        try:
-            instance = Sortie.objects.get(pk=pk, marchandise__is_active=False)
-        except Sortie.DoesNotExist:
-            return Response(
-                {"error": "Cette sortie n'existe pas ou est déjà active."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        instance.is_active = True
-        instance.save(update_fields=["is_active"])
-        return Response(
-            {"message": f"Sortie #{instance.id} restaurée"},
-            status=status.HTTP_200_OK,
+        serializer.save(
+            boutique=marchandise.boutique,   # ✅ ici aussi
+            name=marchandise.name,
+            prix_unitaire=marchandise.prix_vente,
+            total=quantite * marchandise.prix_vente,
+            created_at=timezone.now(),
         )
 
 
@@ -360,12 +269,12 @@ class SortieViewSet(viewsets.ModelViewSet):
         writer = csv.writer(response)
         writer.writerow(["ID", "Marchandise", "Quantité"])
         for s in self.get_queryset():
-            writer.writerow([s.id, s.marchandise.designation, s.quantite])
+            writer.writerow([s.id, s.marchandise.name, s.quantite])
         return response
 
     @action(detail=False, methods=["get"])
     def export_excel(self, request):
-        df = pd.DataFrame(list(self.get_queryset().values("id", "marchandise__designation", "quantite")))
+        df = pd.DataFrame(list(self.get_queryset().values("id", "marchandise__name", "quantite")))
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
             df.to_excel(writer, index=False, sheet_name="Sorties")
@@ -386,7 +295,7 @@ class SortieViewSet(viewsets.ModelViewSet):
         p.setFont("Helvetica", 12)
         y -= 30
         for s in self.get_queryset():
-            line = f"ID: {s.id} | Marchandise: {s.marchandise.designation} | Quantité: {s.quantite}"
+            line = f"ID: {s.id} | Marchandise: {s.marchandise.name} | Quantité: {s.quantite}"
             p.drawString(50, y, line)
             y -= 20
             if y < 50:
@@ -396,31 +305,17 @@ class SortieViewSet(viewsets.ModelViewSet):
         return response
 
 
-class CategorieViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet pour les catégories avec filtrage par entreprise.
-    """
+class CategorieViewSet(MultiTenantMixin, viewsets.ModelViewSet):
+    queryset = Categorie.objects.all().order_by("-created_at")
     serializer_class = CategorieSerializer
-    permission_classes = [AllowAny]  # ou tes permissions personnalisées
-
-    def get_queryset(self):
-        queryset = Categorie.objects.all()
-        entreprise_id = self.request.query_params.get("entreprise")
-        if entreprise_id:
-            queryset = queryset.filter(entreprise_id=entreprise_id)
-        return queryset
+    permission_classes = [IsAuthenticated]
 
 
 
-class InventaireExportView(APIView):
-    """
-    Vue pour exporter l'inventaire complet (stock final, CUMP, valeur)
-    en CSV, Excel ou PDF.
-    """
-    permission_classes = []
+class InventaireExportView(MultiTenantMixin, APIView):
+    permission_classes = [IsAuthenticated]
 
-    def get_inventaire_data(self):
-        marchandises = Marchandise.objects.all()
+    def get_inventaire_data(self, user):
         data = []
 
         for m in marchandises:
@@ -429,13 +324,13 @@ class InventaireExportView(APIView):
 
             stock_initial = m.stock or 0
             stock_final = stock_initial + total_entrees - total_sorties
-            cump = m.prix or 0
+            cump = getattr(m, "prix_achat", 0)  # ⚡ attention: j’ai remplacé m.prix par prix_achat
             valeur = stock_final * cump
 
             data.append({
                 "Référence": m.reference,
-                "Désignation": m.designation,
-                "Catégorie": m.categorie.nom if m.categorie else "",
+                "Nom": m.name,
+                "Catégorie": m.categorie.label if m.categorie else "",
                 "Unité": m.unite,
                 "Seuil": m.seuil,
                 "Stock Initial": stock_initial,
@@ -450,7 +345,10 @@ class InventaireExportView(APIView):
 
     def get(self, request, format=None):
         export_type = request.query_params.get("type", "csv")  # ?type=csv|excel|pdf
-        data = self.get_inventaire_data()
+        data = self.get_inventaire_data(request.user)
+
+        if not data:
+            return Response({"message": "Aucune marchandise trouvée."}, status=404)
 
         if export_type == "csv":
             response = HttpResponse(content_type="text/csv")
@@ -498,36 +396,59 @@ class InventaireExportView(APIView):
         return Response({"error": "Format non supporté"}, status=400)
 
 
-class FournisseurViewSet(viewsets.ModelViewSet):
-    queryset = Fournisseur.objects.all()
+class FournisseurViewSet(MultiTenantMixin, viewsets.ModelViewSet):
+    queryset = Fournisseur.objects.all().order_by("-created_at")
     serializer_class = FournisseurSerializer
-    permission_classes = []
+    permission_classes = [IsAuthenticated]
 
-    def get_queryset(self):
-        qs = Fournisseur.objects.all().prefetch_related("marchandises")
-        entreprise_id = self.request.query_params.get("entreprise")
-        if entreprise_id:
-            try:
-                # On filtre via les marchandises liées à cette entreprise
-                qs = qs.filter(marchandises__entreprise_id=int(entreprise_id)).distinct()
-            except ValueError:
-                return qs.none()
-        return qs
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+
+        # Si ?hard=true alors suppression définitive
+        if request.query_params.get("hard") == "true":
+            instance.delete()
+            return Response(
+                {"message": f"Fournisseur #{instance.id} supprimée définitivement"},
+                status=status.HTTP_204_NO_CONTENT,
+            )
+
+        # Sinon soft delete
+        instance.is_active = False
+        instance.save(update_fields=["is_active"])
+        return Response(
+            {"message": f"Fournisseur #{instance.id} désactivée"},
+            status=status.HTTP_204_NO_CONTENT,
+        )
 
 
-class TransactionViewSet(viewsets.ModelViewSet):
-    queryset = Transaction.objects.filter(is_active=True).select_related("entreprise")
+    @action(detail=False, methods=["get"], url_path="archived")
+    def archived(self, request):
+        archived_items = Fournisseur.objects.filter(is_active=False)
+        serializer = self.get_serializer(archived_items, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="restore")
+    def restore(self, request, pk=None):
+        try:
+            instance = Fournisseur.objects.get(pk=pk, is_active=False)
+        except Fournisseur.DoesNotExist:
+            return Response(
+                {"error": "Cette fournisseur n'existe pas ou est déjà active."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        instance.is_active = True
+        instance.save(update_fields=["is_active"])
+        return Response(
+            {"message": f"Fournisseur #{instance.id} restaurée"},
+            status=status.HTTP_200_OK,
+        )
+
+
+class TransactionViewSet(MultiTenantMixin, viewsets.ModelViewSet):
+    queryset = Transaction.objects.filter(is_active=True).select_related("boutique").order_by("-created_at")
     serializer_class = TransactionSerializer
-    permission_classes = []
-
-    def get_queryset(self):
-        qs = Transaction.objects.filter(is_active=True).select_related("entreprise")
-
-        entreprise_id = self.request.query_params.get("entreprise")
-        if entreprise_id:
-            qs = qs.filter(entreprise_id=entreprise_id)
-
-        return qs
+    permission_classes = [IsAuthenticated]
 
 
     # Soft delete
@@ -577,23 +498,25 @@ class TransactionViewSet(viewsets.ModelViewSet):
         )
 
 
-
 @api_view(["GET"])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def finance_view(request):
-    entreprise_id = request.query_params.get("entreprise")
+    user = request.user
 
-    entrees = Entree.objects.all()
-    sorties = Sortie.objects.all()
-    trans_revenus = Transaction.objects.filter(type='revenu', is_active=True)
-    trans_depenses = Transaction.objects.filter(type='depense', is_active=True)
+    # Appliquer le filtrage tenant-aware
+    entrees = filter_by_tenant(Entree.objects.all(), user)
+    sorties = filter_by_tenant(Sortie.objects.all(), user)
+    trans_revenus = filter_by_tenant(Transaction.objects.filter(type="revenu"), user)
+    trans_depenses = filter_by_tenant(Transaction.objects.filter(type="depense"), user)
 
-    if entreprise_id:
-        entrees = entrees.filter(marchandise__entreprise_id=entreprise_id)
-        sorties = sorties.filter(marchandise__entreprise_id=entreprise_id)
-        trans_revenus = trans_revenus.filter(entreprise_id=entreprise_id)
-        trans_depenses = trans_depenses.filter(entreprise_id=entreprise_id)
-
+    # Optionnel : Admin peut cibler une boutique via ?boutique=ID
+    if user.role == "admin":
+        boutique_id = request.query_params.get("boutique")
+        if boutique_id:
+            entrees = entrees.filter(marchandise__boutique_id=boutique_id)
+            sorties = sorties.filter(marchandise__boutique_id=boutique_id)
+            trans_revenus = trans_revenus.filter(boutique_id=boutique_id)
+            trans_depenses = trans_depenses.filter(boutique_id=boutique_id)
 
     return Response({
         "details": {
@@ -605,28 +528,28 @@ def finance_view(request):
     })
 
 
-
 @api_view(["GET"])
-#@permission_classes([AllowAny, HasActiveSubscription])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def dashboard_view(request):
-    entreprise_id = request.query_params.get("entreprise")
+    user = request.user
+    boutique_id = request.query_params.get("boutique")
 
     today = timezone.now().date()
     start_week = today - timedelta(days=today.weekday())
     end_week = start_week + timedelta(days=6)
 
-    # Filtrage par entreprise
-    transactions = Transaction.objects.all()
-    entrees = Entree.objects.all()
-    sorties = Sortie.objects.all()
-    marchandises = Marchandise.objects.filter(is_active=True)
+    # --- QuerySets filtrés tenant-aware ---
+    transactions = filter_by_tenant(Transaction.objects.all(), user)
+    entrees = filter_by_tenant(Entree.objects.all(), user)
+    sorties = filter_by_tenant(Sortie.objects.all(), user)
+    marchandises = filter_by_tenant(Marchandise.objects.filter(is_active=True), user)
 
-    if entreprise_id:
-        transactions = transactions.filter(entreprise_id=entreprise_id)
-        entrees = entrees.filter(marchandise__entreprise_id=entreprise_id)
-        sorties = sorties.filter(marchandise__entreprise_id=entreprise_id)
-        marchandises = marchandises.filter(entreprise_id=entreprise_id)
+    # --- Si admin + param boutique ---
+    if user.role == "admin" and boutique_id:
+        transactions = transactions.filter(boutique_id=boutique_id)
+        entrees = entrees.filter(marchandise__boutique_id=boutique_id)
+        sorties = sorties.filter(marchandise__boutique_id=boutique_id)
+        marchandises = marchandises.filter(boutique_id=boutique_id)
 
     # --- Stats du jour ---
     revenu_du_jour = (
@@ -644,20 +567,17 @@ def dashboard_view(request):
     # --- Graphiques hebdo ---
     jours_fr = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
 
-    # Entrées par jour
     entrees_week = (
         entrees.filter(created_at__date__range=[start_week, end_week])
-        .annotate(day=ExtractWeekDay("created_at"))  # 1=dimanche, 2=lundi...
+        .annotate(day=ExtractWeekDay("created_at"))
         .values("day")
         .annotate(total=Count("id"))
     )
     graph_entrees = {j: 0 for j in jours_fr}
     for e in entrees_week:
-        # Adjust: Django ExtractWeekDay -> 2=Lundi ... 1=Dimanche
         day_index = (e["day"] - 2) % 7
         graph_entrees[jours_fr[day_index]] = e["total"]
 
-    # Sorties par jour
     sorties_week = (
         sorties.filter(created_at__date__range=[start_week, end_week])
         .annotate(day=ExtractWeekDay("created_at"))
@@ -669,6 +589,7 @@ def dashboard_view(request):
         day_index = (s["day"] - 2) % 7
         graph_sorties[jours_fr[day_index]] = s["total"]
 
+    # --- Réponse ---
     data = {
         "stats": {
             "revenu_du_jour": revenu_du_jour,
@@ -685,22 +606,21 @@ def dashboard_view(request):
 
 
 @api_view(['GET'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def rapport_stock(request):
-    # --- Filtre entreprise ---
-    entreprise_id = request.query_params.get("entreprise")
+    user = request.user
+    boutique_id = request.query_params.get("boutique")
 
-    # --- Marchandises ---
-    marchandises = Marchandise.objects.filter(is_active=True)
+    # --- Base QuerySets filtrés par tenant ---
+    marchandises = filter_by_tenant(Marchandise.objects.all(), user)
+    entrees = filter_by_tenant(Entree.objects.all(), user)
+    sorties = filter_by_tenant(Sortie.objects.all(), user)
 
-    # --- Entrées & Sorties ---
-    entrees = Entree.objects.all()
-    sorties = Sortie.objects.all()
-
-    if entreprise_id:
-        marchandises = marchandises.filter(entreprise_id=entreprise_id)
-        entrees = entrees.filter(marchandise__entreprise_id=entreprise_id)
-        sorties = sorties.filter(marchandise__entreprise_id=entreprise_id)
+    # --- Cas particulier : admin qui force un boutique_id ---
+    if user.role == "admin" and boutique_id:
+        marchandises = marchandises.filter(boutique_id=boutique_id)
+        entrees = entrees.filter(marchandise__boutique_id=boutique_id)
+        sorties = sorties.filter(marchandise__boutique_id=boutique_id)
 
     # --- Stats Marchandises ---
     total_marchandise = marchandises.count()
@@ -714,22 +634,24 @@ def rapport_stock(request):
     total_stock = marchandises.aggregate(total_stock=Sum('stock'))['total_stock'] or 0
     stock_moyen = total_stock / total_marchandise if total_marchandise else 0
 
-    marchandise_par_mois = {}
-    for month in range(1, 13):
-        marchandise_par_mois[datetime.date(2000, month, 1).strftime('%b')] = marchandises.filter(
+    marchandise_par_mois = {
+        datetime.date(2000, month, 1).strftime('%b'): marchandises.filter(
             created_at__month=month
         ).count()
+        for month in range(1, 13)
+    }
 
     # --- Stats Entrées ---
     article_en_entree = entrees.count()
     valeur_entree = entrees.aggregate(total=Sum('total'))['total'] or 0
     quantite_total_entree = entrees.aggregate(total=Sum('quantite'))['total'] or 0
 
-    entree_par_mois = {}
-    for month in range(1, 13):
-        entree_par_mois[datetime.date(2000, month, 1).strftime('%b')] = entrees.filter(
+    entree_par_mois = {
+        datetime.date(2000, month, 1).strftime('%b'): entrees.filter(
             created_at__month=month
         ).aggregate(total=Sum('quantite'))['total'] or 0
+        for month in range(1, 13)
+    }
 
     today = timezone.now().date()
     current_month = today.month
@@ -754,16 +676,17 @@ def rapport_stock(request):
     quantite_sortie = sorties.aggregate(total=Sum('quantite'))['total'] or 0
     valeur_sortie = sorties.aggregate(total=Sum('total'))['total'] or 0
 
-    article_le_plus_sortie_obj = sorties.values('designation').annotate(
+    article_le_plus_sortie_obj = sorties.values('name').annotate(
         qte=Sum('quantite')
     ).order_by('-qte').first()
-    article_le_plus_sortie = article_le_plus_sortie_obj['designation'] if article_le_plus_sortie_obj else None
+    article_le_plus_sortie = article_le_plus_sortie_obj['name'] if article_le_plus_sortie_obj else None
 
-    sortie_par_mois = {}
-    for month in range(1, 13):
-        sortie_par_mois[datetime.date(2000, month, 1).strftime('%b')] = sorties.filter(
+    sortie_par_mois = {
+        datetime.date(2000, month, 1).strftime('%b'): sorties.filter(
             created_at__month=month
         ).aggregate(total=Sum('quantite'))['total'] or 0
+        for month in range(1, 13)
+    }
 
     # --- Assemblage des données ---
     data = {

@@ -1,15 +1,12 @@
 import React, { useEffect, useState } from "react";
-import axios from "axios";
+import api from "../../../Api"; // <-- API centralisée
 
-const API_BASE = "http://localhost:8000/api/gestion-stock";
-
-const NouvelleEntree = ({ onClose, onAdded }) => {
-  const userData = JSON.parse(localStorage.getItem("userData"));
-  const entreprise_id = userData?.id;
+const NouvelleEntree = ({ onClose, onAdded, entree, marchandisesById, boutique_id}) => {
   const [marchandises, setMarchandises] = useState([]);
   const [form, setForm] = useState({
-    marchandise_id: "",
-    quantite: "",
+    marchandise_id: entree?.marchandise?.id || entree?.marchandise || "",
+    quantite: entree?.quantite || "",
+    boutique: boutique_id,
   });
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -17,13 +14,16 @@ const NouvelleEntree = ({ onClose, onAdded }) => {
   // Charger toutes les marchandises
   useEffect(() => {
     let mounted = true;
-    axios
-      .get(`${API_BASE}/marchandises/?entreprise=${entreprise_id}`)
-      .then((res) => mounted && setMarchandises(res.data || []))
-      .catch((e) => {
+    const fetchMarchandises = async () => {
+      try {
+        const res = await api.get("/gestion_stock/marchandises/");
+        if (mounted) setMarchandises(res.data || []);
+      } catch (e) {
         console.error("Erreur chargement marchandises:", e);
-        setErr("Impossible de charger les marchandises ❌");
-      });
+        if (mounted) setErr("Impossible de charger les marchandises ❌");
+      }
+    };
+    fetchMarchandises();
     return () => (mounted = false);
   }, []);
 
@@ -45,14 +45,23 @@ const NouvelleEntree = ({ onClose, onAdded }) => {
       const payload = {
         marchandise_id: Number(form.marchandise_id),
         quantite: Number(form.quantite),
+        boutique: boutique_id,
       };
 
-      const res = await axios.post(`${API_BASE}/entrees/`, payload);
+      let res;
+      if (entree?.id) {
+        // 🔹 Mode édition (PUT)
+        res = await api.put(`/gestion_stock/entrees/${entree.id}/`, payload);
+      } else {
+        // 🔹 Mode ajout (POST)
+        res = await api.post("/gestion_stock/entrees/", payload);
+      }
+
       onAdded?.(res.data);
       onClose?.();
     } catch (error) {
       console.error(error);
-      setErr("Erreur lors de l’ajout de l’entrée ❌");
+      setErr("Erreur lors de l’enregistrement ❌");
     } finally {
       setLoading(false);
     }
@@ -62,12 +71,11 @@ const NouvelleEntree = ({ onClose, onAdded }) => {
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white text-gray-800 p-6 rounded-2xl w-full max-w-md shadow-2xl relative">
         <h2 className="text-xl font-bold mb-4 text-center">
-          ➕ Ajouter une entrée
+          {entree ? "✏️ Modifier l’entrée" : "➕ Ajouter une entrée"}
         </h2>
         <button
           onClick={onClose}
           className="absolute top-3 right-3 text-gray-500 hover:text-gray-800 text-xl"
-          aria-label="Fermer"
         >
           ✖
         </button>
@@ -88,8 +96,8 @@ const NouvelleEntree = ({ onClose, onAdded }) => {
               {marchandises.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.reference
-                    ? `${m.reference} — ${m.designation}`
-                    : m.designation}
+                    ? `${m.reference} — ${m.name}`
+                    : m.name}
                 </option>
               ))}
             </select>
@@ -97,14 +105,14 @@ const NouvelleEntree = ({ onClose, onAdded }) => {
 
           {selected && (
             <div className="rounded-lg border p-3 text-sm bg-gray-50">
-              <div className="font-semibold">{selected.designation}</div>
-              <div>Catégorie : {selected?.categorie?.nom || "—"}</div>
+              <div className="font-semibold">{selected.name}</div>
+              <div>Catégorie : {selected?.categorie?.label || "—"}</div>
               <div>Unité : {selected.unite}</div>
               <div>Prix d'achat : {Number(selected.prix_achat || 0).toLocaleString()} FCFA</div>
               {selected.image && (
                 <img
                   src={selected.image}
-                  alt={selected.designation}
+                  alt={selected.name}
                   className="mt-2 w-20 h-20 object-cover rounded"
                 />
               )}
@@ -138,7 +146,11 @@ const NouvelleEntree = ({ onClose, onAdded }) => {
               disabled={loading}
               className="px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-60"
             >
-              {loading ? "Enregistrement..." : "Valider l’entrée"}
+              {loading
+                ? "Enregistrement..."
+                : entree
+                ? "Mettre à jour"
+                : "Ajouter"}
             </button>
           </div>
         </form>

@@ -1,38 +1,47 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
+from rest_framework_simplejwt.views import TokenVerifyView
 from .views import (
-    EntrepriseViewSet,
-    UtilisateurViewSet,
-    LoginView,
+    CustomTokenObtainPairView,
+    BoutiqueViewSet,
+    PersonnelViewSet,
+    AdminSignupView,
+    BoutiqueSignupView,
+    PersonnelSignupView,
     ActiviteViewSet,
-    RoleViewSet,
+    ProfilPersonnelViewSet,
     CurrencyView,
     PlanViewSet,
     SubscriptionViewSet,
-    PaymentViewSet,
-    RefreshTokenView,
+    me,
+    cookie_refresh,
+    UserViewSet,
+    logout_view,
 )
 
 
-# Création du router DRF
 router = DefaultRouter()
-router.register(r'entreprises', EntrepriseViewSet, basename='entreprise')
-router.register(r'utilisateurs', UtilisateurViewSet, basename='utilisateur')
+router.register(r'boutiques', BoutiqueViewSet, basename='boutique')
+router.register(r'personnels', PersonnelViewSet, basename='personnel')
 router.register(r'activites', ActiviteViewSet, basename='activite')
-router.register(r'roles', RoleViewSet, basename='role')
+router.register(r'profil', ProfilPersonnelViewSet, basename='profil')
 router.register(r'plans', PlanViewSet, basename='plans')
 router.register(r'subscriptions', SubscriptionViewSet, basename='subscriptions')
-router.register(r'payments', PaymentViewSet, basename='payments')
+router.register(r'users', UserViewSet, basename="user")
 
 
 urlpatterns = [
-    path('', include(router.urls)),
-    path("auth/login/", LoginView.as_view(), name="login"),
-    path("auth/refresh/", RefreshTokenView.as_view(), name="token_refresh"),
+    # ---- CRUD ----
+    path("", include(router.urls)),
+    
+    path("auth/login/", CustomTokenObtainPairView.as_view(), name="token_obtain_pair"),
+    path("token/refresh/", cookie_refresh, name="token_refresh"),
+    path("token/verify/", TokenVerifyView.as_view(), name="token_verify"),
+    path("auth/me/", me, name="me"),
+
+    path("signup/admin/", AdminSignupView.as_view(), name="signup_admin"),
+    path("signup/boutique/", BoutiqueSignupView.as_view(), name="signup_boutique"),
+    path("signup/personnel/", PersonnelSignupView.as_view(), name="signup_personnel"),
     path("currency/", CurrencyView.as_view(), name="currency"),
+    path("auth/logout/", logout_view, name="auth_logout"),
 ]
-
-
-"""
- - POST /entreprises/{id}/set_password/  → Changer de mot de passe 
-"""
