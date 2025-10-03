@@ -1,35 +1,33 @@
 from pathlib import Path
 from datetime import timedelta
 import os
+from dotenv import load_dotenv
 
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
+# Charger le .env depuis la racine du projet
+load_dotenv(Path(__file__).resolve().parent.parent / '.env')
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-change-in-production")
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/
+# Gestion de DEBUG - votre .env a "True" comme string
+DEBUG = os.getenv("DEBUG", "False").lower() in ["true", "1", "yes"]
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-tyh8wyv8#*38h4d%z@qcmz%ac6_a=!mj*cdmiyrmy+!j@s3v0)'
+ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1,backend").split(",")
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
-
-SECURE_COOKIE = not DEBUG  # True en production, False en dev
-
-ALLOWED_HOSTS = []
-CORS_ALLOW_ALL_ORIGINS = True
-
+# CORS Configuration
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
-    "http://localhost:5174",  # Frontend local
-    # "https://ton-domaine.com",  # En prod
+    "http://localhost:5174",
+    "http://frontend:5174",
+    "http://localhost:80",
+    "http://frontend:80",
 ]
 
+CORS_ALLOW_ALL_ORIGINS = DEBUG
 CORS_ALLOW_CREDENTIALS = True
 
 # Application definition
-
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -39,26 +37,28 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'rest_framework.authtoken',
+    'corsheaders',
     'accounts', 
     'gestion_stock',
     'core',
     'pawapay',
-    "corsheaders",
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    "corsheaders.middleware.CorsMiddleware", 
 ]
 
-AUTH_USER_MODEL = "accounts.User"
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
+AUTH_USER_MODEL = "accounts.User"
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
@@ -70,13 +70,12 @@ REST_FRAMEWORK = {
 }
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),   # durée du token d’accès
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=1),      # durée du token de refresh
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
     "ROTATE_REFRESH_TOKENS": False,
     "BLACKLIST_AFTER_ROTATION": True,
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
-
 
 ROOT_URLCONF = 'backend.urls'
 
@@ -96,35 +95,21 @@ TEMPLATES = [
     },
 ]
 
-
-
 WSGI_APPLICATION = 'backend.wsgi.application'
 
-
-# Database
-# https://docs.djangoproject.com/en/5.0/ref/settings/#databases
-
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
-}
-"""
+# Database - utilise vos variables d'environnement
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'buxium_db',       # nom de la base
-        'USER': 'postgres',     # utilisateur
-        'PASSWORD': 'abdoul1',  # mot de passe
-        'HOST': 'localhost',       # ou l'IP du serveur PostgreSQL
-        'PORT': '5432',            # port par défaut de PostgreSQL
+        'NAME': os.getenv("DATABASE_NAME", "buxium_db"),
+        'USER': os.getenv("DATABASE_USER", "postgres"),
+        'PASSWORD': os.getenv("DATABASE_PASSWORD", "abdoul1"),
+        'HOST': os.getenv("DATABASE_HOST", "db"),
+        'PORT': os.getenv("DATABASE_PORT", "5432"),
     }
 }
-"""
-# Password validation
-# https://docs.djangoproject.com/en/5.0/ref/settings/#auth-password-validators
 
+# Password validation
 AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
@@ -140,30 +125,37 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-
 # Internationalization
-# https://docs.djangoproject.com/en/5.0/topics/i18n/
-
-LANGUAGE_CODE = 'en-us'
-
-TIME_ZONE = 'UTC'
-
+LANGUAGE_CODE = 'fr-fr'
+TIME_ZONE = 'Africa/Dakar'
 USE_I18N = True
-
 USE_TZ = True
 
+# Static files
+STATIC_URL = '/static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
-# Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/5.0/howto/static-files/
-
-STATIC_URL = 'static/'
-
-# Default primary key field type
-# https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
+# Media files
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 PAWAPAY_TOKEN = os.getenv("PAWAPAY_TOKEN")
 
-MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "media"
+# Security settings - désactivées en développement
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+else:
+    # En développement
+    SESSION_COOKIE_SECURE = False
+    CSRF_COOKIE_SECURE = False
+
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:5174",
+    "http://frontend:5174",
+    "http://localhost:80",
+    "http://frontend:80",
+]

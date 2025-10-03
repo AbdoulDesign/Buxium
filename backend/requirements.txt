@@ -1,0 +1,23 @@
+Django==5.0.7
+djangorestframework==3.15.2
+djangorestframework-simplejwt==5.3.1
+django-cors-headers==4.4.0
+django-filter==24.3
+psycopg2-binary==2.9.9
+Pillow==11.1.0
+python-dotenv==1.0.1
+stripe==10.7.0
+requests==2.32.3
+reportlab==4.3.1
+PyPDF2==3.0.1
+pytesseract==0.3.13
+lxml==5.3.0
+zeep==4.3.1
+gunicorn==21.2.0
+pandas==2.2.3
+whitenoise==6.6.0
+redis==5.0.1
+django-redis==5.4.0  # ← AJOUTER cette ligne
+# django-debug-toolbar==4.4.4  # Décommenter si besoin
+django-permissions-policy==4.16.0  # Décommenter si besoin
+# django-compressor==4.4  # Décommenter si besoin
