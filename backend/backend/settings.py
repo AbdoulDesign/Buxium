@@ -9,23 +9,50 @@ load_dotenv(Path(__file__).resolve().parent.parent / '.env')
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-change-in-production")
-
-# Gestion de DEBUG - votre .env a "True" comme string
 DEBUG = os.getenv("DEBUG", "False").lower() in ["true", "1", "yes"]
 
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1,backend").split(",")
+ALLOWED_HOSTS = ['*']  # ← Pour le développement, autoriser tout
 
-# CORS Configuration
+# CORS Configuration COMPLÈTE
+CORS_ALLOW_ALL_ORIGINS = True  # ← True en développement
+CORS_ALLOW_CREDENTIALS = True
+
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
     "http://localhost:5174",
+    "http://127.0.0.1:5174", 
     "http://frontend:5174",
-    "http://localhost:80",
-    "http://frontend:80",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+    "http://nginx:80",
 ]
 
-CORS_ALLOW_ALL_ORIGINS = DEBUG
-CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET', 
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
+
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+    "http://localhost:8080", 
+    "http://127.0.0.1:8080",
+]
 
 # Application definition
 INSTALLED_APPS = [
@@ -37,15 +64,16 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'rest_framework.authtoken',
-    'corsheaders',
+    'corsheaders',  # ← Doit être après les apps Django
     'accounts', 
     'gestion_stock',
     'core',
     'pawapay',
 ]
 
+# MIDDLEWARE - CORS en PREMIER
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',
+    'corsheaders.middleware.CorsMiddleware',  # ← TRÈS IMPORTANT: Premier!
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -152,10 +180,3 @@ else:
     # En développement
     SESSION_COOKIE_SECURE = False
     CSRF_COOKIE_SECURE = False
-
-CSRF_TRUSTED_ORIGINS = [
-    "http://localhost:5174",
-    "http://frontend:5174",
-    "http://localhost:80",
-    "http://frontend:80",
-]

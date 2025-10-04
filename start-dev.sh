@@ -1,24 +1,30 @@
 #!/bin/bash
-echo "🚀 Démarrage de Buxium en mode développement..."
+echo "🚀 Démarrage de Buxium..."
 
-# Vérifier si Docker est installé
+# Vérifier Docker
 if ! command -v docker &> /dev/null; then
-    echo "❌ Docker n'est pas installé"
+    echo "❌ Docker n'est pas installé."
     exit 1
 fi
 
-# Créer le fichier .env s'il n'existe pas
+# Nettoyer
+echo "🧹 Nettoyage..."
+docker compose down 2>/dev/null || true
+
+# Vérifier .env
 if [ ! -f .env ]; then
     echo "📝 Création du fichier .env..."
     cp .env.example .env
-    echo "⚠️  N'oubliez pas de modifier le fichier .env avec vos valeurs réelles"
+    echo "⚠️  Modifiez le fichier .env avec vos valeurs !"
 fi
 
-# Construire et lancer les services
-echo "🐳 Construction des conteneurs..."
-docker compose up --build
+echo "🐳 Construction sans cache..."
+docker compose build --no-cache
 
-echo "✅ Buxium est démarré!"
-echo "🌐 Frontend: http://localhost:5174"
-echo "🔗 Backend: http://localhost:8000"
-echo "🌐 Application: http://localhost:8080"
+echo "🚀 Lancement..."
+docker compose up
+
+echo ""
+echo "✅ Si tout marche :"
+echo "   Frontend: http://localhost:5174"
+echo "   Backend:  http://localhost:8000"
