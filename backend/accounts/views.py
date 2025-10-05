@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.decorators import action
 from rest_framework.views import APIView
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework_simplejwt.views import TokenObtainPairView
 from .serializers import (
     BoutiqueSerializer,
@@ -98,7 +98,7 @@ class BoutiqueViewSet(MultiTenantMixin, viewsets.ModelViewSet):
 
     def get_permissions(self):
         if self.action in ["create", "update", "partial_update", "destroy"]:
-            return [IsAuthenticated(), IsBoutique()]
+            return [IsAuthenticated()]
         return [IsAuthenticated()]
 
 
@@ -298,24 +298,48 @@ class CurrencyView(APIView):
 class PlanViewSet(viewsets.ModelViewSet):
     queryset = Plan.objects.all()
     serializer_class = PlanSerializer
-    permission_classes = []
+    permission_classes = [IsAuthenticated]
 
 
 # -------- Abonnement --------
 class SubscriptionViewSet(MultiTenantMixin, viewsets.ModelViewSet):
-    queryset = Subscription.objects.all()
+    """
+    Gestion des abonnements (Subscription)
+    - Les boutiques peuvent créer leur propre abonnement
+    - L'admin peut créer ou supprimer un abonnement pour n'importe quelle boutique
+    """
+    queryset = Subscription.objects.all().select_related("boutique", "plan")
     serializer_class = SubscriptionSerializer
     permission_classes = [IsAuthenticated]
 
     def create(self, request, *args, **kwargs):
         user = request.user
-        if user.role != "boutique":
-            return Response(
-                {"detail": "Seules les boutiques peuvent souscrire."},
-                status=status.HTTP_403_FORBIDDEN
-            )
 
-        boutique = user.boutique_profil
+        # ✅ Autoriser admin à créer un abonnement pour n’importe quelle boutique
+        if user.is_superuser or getattr(user, "role", None) == "admin":
+            boutique_id = request.data.get("boutique")
+            if not boutique_id:
+                return Response(
+                    {"detail": "Boutique requise pour la création par un administrateur."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            try:
+                boutique = Boutique.objects.get(id=boutique_id)
+            except Boutique.DoesNotExist:
+                return Response(
+                    {"detail": "Boutique introuvable."},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+        else:
+            # 🔒 Les utilisateurs non admin doivent être des boutiques
+            if getattr(user, "role", None) != "boutique":
+                return Response(
+                    {"detail": "Seules les boutiques ou les administrateurs peuvent souscrire."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            boutique = user.boutique_profil
+
+        # Vérification du plan
         plan_id = request.data.get("plan")
         if not plan_id:
             return Response({"detail": "Plan requis."}, status=status.HTTP_400_BAD_REQUEST)
@@ -325,42 +349,38 @@ class SubscriptionViewSet(MultiTenantMixin, viewsets.ModelViewSet):
         except Plan.DoesNotExist:
             return Response({"detail": "Plan introuvable."}, status=status.HTTP_404_NOT_FOUND)
 
-        # Vérifier s'il existe un abonnement non expiré (actif ou en attente d'expiration)
+        # Vérifier s’il existe déjà un abonnement non expiré
         non_expired_sub = Subscription.objects.filter(
             boutique=boutique
         ).exclude(
             status=Subscription.STATUS_EXPIRED
-        ).exclude(
-            status=Subscription.STATUS_CANCELLED
         ).first()
 
         if non_expired_sub:
-            # Vérifier si l'abonnement est toujours actif (non expiré)
+            # Vérifier si l'abonnement est encore actif
             if non_expired_sub.is_active():
-                # Abonnement actif trouvé
                 if non_expired_sub.plan.name.lower() == "gratuit":
-                    # Gratuit actif → autorisé seulement si le nouveau plan est payant
+                    # Gratuit actif → autorisé uniquement si le nouveau est payant
                     if plan.name.lower() == "gratuit":
                         return Response(
                             {"detail": "L'abonnement gratuit n'est utilisable qu'une seule fois."},
                             status=status.HTTP_400_BAD_REQUEST
                         )
-                    # Gratuit actif → peut aller vers Payant
                 else:
-                    # 🔒 Abonnement payant encore actif → interdiction totale
+                    # 🔒 Abonnement payant actif → interdit
                     return Response(
-                        {"detail": "Il y a un abonnement payant en cours pour cette boutique. "
-                                "Attendez la fin de l'abonnement actuel avant de souscrire à nouveau."},
+                        {"detail": "Un abonnement payant est déjà actif pour cette boutique. "
+                                   "Attendez la fin de l'abonnement avant d'en souscrire un autre."},
                         status=status.HTTP_400_BAD_REQUEST
                     )
             else:
-                # Abonnement non expiré mais inactif (en transition)
+                # Abonnement en transition
                 return Response(
-                    {"detail": "Un abonnement est en cours de traitement. Veuillez attendre qu'il soit complètement expiré."},
+                    {"detail": "Un abonnement est en cours de traitement. Attendez qu’il expire."},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-        # Vérifier si le gratuit a déjà été utilisé dans le passé
+        # Vérifier si le plan gratuit a déjà été utilisé dans le passé
         if plan.name.lower() == "gratuit":
             if Subscription.objects.filter(
                 boutique=boutique,
@@ -371,17 +391,41 @@ class SubscriptionViewSet(MultiTenantMixin, viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-        # ✅ Créer la nouvelle souscription
+        # ✅ Création de la nouvelle souscription
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         serializer.save(boutique=boutique, plan=plan)
 
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
+    # ✅ L’admin seul peut supprimer une souscription
+    def destroy(self, request, *args, **kwargs):
+        user = request.user
+        instance = self.get_object()
+
+        if not (user.is_superuser or getattr(user, "role", None) == "admin"):
+            return Response(
+                {"detail": "Seul l’administrateur peut supprimer un abonnement."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        self.perform_destroy(instance)
+        return Response({"detail": "Abonnement supprimé avec succès."}, status=status.HTTP_204_NO_CONTENT)
+
+    # (Optionnel) filtrage automatique selon l’utilisateur
+    def get_queryset(self):
+        user = self.request.user
+        qs = super().get_queryset()
+
+        if getattr(user, "role", None) == "boutique" and hasattr(user, "boutique_profil"):
+            return qs.filter(boutique=user.boutique_profil)
+        return qs
+
 
 
 @api_view(["POST"])
 @permission_classes([])
+@authentication_classes([])
 def cookie_refresh(request):
     """
     Rafraîchir le token d'accès avec gestion d'erreur améliorée
@@ -398,30 +442,24 @@ def cookie_refresh(request):
         # Vérifier si le token est valide
         refresh = RefreshToken(refresh_token)
         
-        # Vérifier l'expiration
-        from django.utils import timezone
-        from datetime import datetime
+        # NE PAS vérifier manuellement l'expiration - TokenError le fera automatiquement
+        # Lorsque vous accédez à access_token, il vérifie automatiquement l'expiration
         
-        if refresh.payload.get('exp', 0) < timezone.now().timestamp():
-            return Response(
-                {"detail": "Refresh token expired."}, 
-                status=status.HTTP_401_UNAUTHORIZED
-            )
-            
         data = {"access": str(refresh.access_token)}
         return Response(data, status=status.HTTP_200_OK)
         
     except TokenError as e:
+        print(f"TokenError during refresh: {str(e)}")  # Debug
         return Response(
-            {"detail": f"Invalid refresh token: {str(e)}"}, 
+            {"detail": "Invalid or expired refresh token."}, 
             status=status.HTTP_401_UNAUTHORIZED
         )
     except Exception as e:
+        print(f"Unexpected error during refresh: {str(e)}")  # Debug
         return Response(
             {"detail": "Unexpected error during token refresh."}, 
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
-
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])

@@ -1,4 +1,4 @@
-// src/components/auth/Login.jsx
+// src/components/auth/Login.jsx - VERSION CORRIGÉE
 import React, { useState } from "react";
 import { FiUser, FiLock } from "react-icons/fi";
 import { useNavigate } from "react-router-dom";
@@ -9,12 +9,15 @@ const Login = () => {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const { signin, loading } = useAuth();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const { signin } = useAuth();
   const navigate = useNavigate();
 
   const handleLogin = async (e) => {
     e.preventDefault();
     setError("");
+    setIsSubmitting(true); // ← Début de la soumission
+    
     try {
       await signin(username, password);
       navigate("/dashboard");
@@ -24,6 +27,8 @@ const Login = () => {
         err?.message ||
         "Échec de connexion. Vérifiez vos identifiants."
       );
+    } finally {
+      setIsSubmitting(false); // ← Fin de la soumission
     }
   };
 
@@ -32,13 +37,13 @@ const Login = () => {
       <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-md border border-gray-200">
         <div className="text-center mb-6">
           <div className="text-4xl font-extrabold tracking-tight flex items-center justify-center gap-2">
-                    <img
-                            src={logo_transparent}
-                            alt="Buxium Logo"
-                            className="h-10 w-10 object-contain"
-                          />
-                    <span className="text-black/70">Buxium</span>
-                  </div>
+            <img
+              src={logo_transparent}
+              alt="Buxium Logo"
+              className="h-10 w-10 object-contain"
+            />
+            <span className="text-black/70">Buxium</span>
+          </div>
           <p className="text-gray-600 text-sm mt-2">Connexion à votre espace de gestion</p>
         </div>
 
@@ -52,9 +57,9 @@ const Login = () => {
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="Entrez votre nom utilisateur"
-                className="w-full pl-10 pr-4 py-2 rounded-lg bg-gray-50 text-gray-800 border border-gray-300"
+                className="w-full pl-10 pr-4 py-2 rounded-lg bg-gray-50 text-gray-800 border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 focus:outline-none transition-all"
                 required
-                disabled={loading}
+                disabled={isSubmitting}
               />
             </div>
           </div>
@@ -68,22 +73,37 @@ const Login = () => {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full pl-10 pr-4 py-2 rounded-lg bg-gray-50 text-gray-800 border border-gray-300"
+                className="w-full pl-10 pr-4 py-2 rounded-lg bg-gray-50 text-gray-800 border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 focus:outline-none transition-all"
                 required
-                disabled={loading}
+                disabled={isSubmitting}
               />
             </div>
           </div>
 
           <button
             type="submit"
-            disabled={loading}
-            className="w-full py-3 rounded-lg bg-[#43AB8A] hover:bg-[#369873] text-white font-semibold"
+            disabled={isSubmitting}
+            className={`w-full py-3 rounded-lg font-semibold transition-all ${
+              isSubmitting 
+                ? 'bg-gray-400 cursor-not-allowed' 
+                : 'bg-[#43AB8A] hover:bg-[#369873] text-white'
+            }`}
           >
-            {loading ? "Connexion..." : "Se connecter"}
+            {isSubmitting ? (
+              <div className="flex items-center justify-center">
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
+                Connexion...
+              </div>
+            ) : (
+              'Se connecter'
+            )}
           </button>
 
-          {error && <p className="text-red-500 text-sm mt-3 text-center">{error}</p>}
+          {error && (
+            <div className="p-3 rounded-lg bg-red-50 border border-red-200">
+              <p className="text-red-600 text-sm text-center">{error}</p>
+            </div>
+          )}
         </form>
       </div>
     </div>

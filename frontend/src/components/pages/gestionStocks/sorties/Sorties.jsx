@@ -396,7 +396,7 @@ const Sorties = () => {
                   <td className="p-2">
                     {new Date(s.created_at).toLocaleDateString("fr-FR", {
                       day: "2-digit",
-                      month: "long",
+                      month: "short",
                       year: "numeric",
                     })}
                   </td>

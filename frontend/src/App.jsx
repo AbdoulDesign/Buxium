@@ -34,6 +34,9 @@ import { AuthProvider } from "./hooks/useAuth";
 import PrivateRoute from "./components/PrivateRoute";
 import DetailAbonnement from "./components/pages/gestionStocks/abonnement/DetailAbonnement";
 import SignupBoutique from "./components/signup/SignupBoutique";
+import Boutique from "./components/pages/gestionStocks/Boutique";
+import Souscription from "./components/pages/gestionStocks/Souscription";
+import Plans from "./components/pages/gestionStocks/Plans";
 
 function App() {
   return (
@@ -68,6 +71,9 @@ function App() {
             <Route path="abonnement" element={<PageAbonnement />} />
             <Route path="abonnement/:id" element={<DetailAbonnement/>} />
             <Route path="aides" element={<PageAide />} />
+            <Route path="boutiques" element={<Boutique/>} />
+            <Route path="souscriptions" element={<Souscription/>} />
+            <Route path="plans" element={<Plans/>} />
             <Route path="commandes" element={<Commande />} />
             <Route path="menu" element={<Menu />} />
             <Route path="ventes" element={<Ventes />} />

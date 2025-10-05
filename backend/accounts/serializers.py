@@ -67,10 +67,11 @@ class SetNewPasswordSerializer(serializers.Serializer):
 
 class BoutiqueSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
+    activite_label = serializers.CharField(source="activite.label", read_only=True)
 
     class Meta:
         model = Boutique
-        fields = ['id', 'name', 'adresse', 'telephone', "activite", "user","logo", "is_active"]
+        fields = ['id', 'name', 'adresse', 'telephone', "activite", "activite_label", "user","logo", "is_active", "created_at"]
 
 
 class PersonnelSerializer(serializers.ModelSerializer):

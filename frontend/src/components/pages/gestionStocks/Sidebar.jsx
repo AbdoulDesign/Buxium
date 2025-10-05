@@ -62,27 +62,45 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
     { path: "/dashboard/finance", label: "Finance", icon: <BiCreditCard /> },
     { path: "/dashboard/rapports", label: "Rapports", icon: <BiFile /> },
     { path: "/dashboard/utilisateurs", label: "Utilisateurs", icon: <BiUser /> },
+    { path: "/dashboard/boutiques", label: "Boutiques", icon: <BiSupport /> },
+    { path: "/dashboard/souscriptions", label: "Souscriptions", icon: <BiSupport /> },
+    { path: "/dashboard/plans", label: "Plans", icon: <BiSupport /> },
     { path: "/dashboard/abonnement", label: "Abonnement", icon: <BiCreditCard /> },
     { path: "/dashboard/parametres", label: "Paramètres", icon: <BiCog /> },
     { path: "/dashboard/aides", label: "Aide", icon: <BiSupport /> },
   ];
 
   // 🎯 Appliquer les règles de visibilité selon le rôle
-  let visibleLinks = links;
 
-  if (user?.role === "personnel" && user?.profil?.label === "Gerant") {
-    visibleLinks = links.filter((l) => l.label !== "Utilisateurs");
-  }
+  let visibleLinks = [...links];
 
-  if (user?.role === "personnel" && user?.profil?.label === "Stockiste") {
-    visibleLinks = links.filter((l) =>
-      ["Marchandises", "Sorties", "Entrées", "Inventaires", "Paramètres"].includes(l.label)
-    );
-  }
+// Admin : cacher "Paramètres"
+if (user?.role === "admin") {
+  visibleLinks = visibleLinks.filter((l) => l.label !== "Paramètres");
+}
 
-  const filteredLinks = visibleLinks.filter((link) =>
-    link.label.toLowerCase().includes(filter.toLowerCase())
+// Boutique ou Personnel : cacher certains liens
+if (["boutique", "personnel"].includes(user?.role)) {
+  visibleLinks = visibleLinks.filter(
+    (l) => !["Souscriptions", "Plans", "Boutiques"].includes(l.label)
   );
+}
+
+// Personnel : filtrage selon profil
+if (user?.role === "personnel" && user?.profil?.label === "Gerant") {
+  visibleLinks = visibleLinks.filter((l) => l.label !== "Utilisateurs");
+}
+
+if (user?.role === "personnel" && user?.profil?.label === "Stockiste") {
+  visibleLinks = visibleLinks.filter((l) =>
+    ["Marchandises", "Sorties", "Entrées", "Inventaires", "Paramètres"].includes(l.label)
+  );
+}
+
+// Filtrer par recherche
+const filteredLinks = visibleLinks.filter((link) =>
+  link.label.toLowerCase().includes(filter.toLowerCase())
+);
 
   return (
     <>
