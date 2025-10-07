@@ -19,4 +19,4 @@ COPY backend/ .
 EXPOSE 8000
 
 # ---- Étape 7 : lancer gunicorn ----
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "backend.backend.wsgi:application"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "backend.wsgi:application"]
