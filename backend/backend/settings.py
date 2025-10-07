@@ -13,6 +13,19 @@ DEBUG = os.getenv("DEBUG", "False").lower() in ["true", "1", "yes"]
 
 ALLOWED_HOSTS = ['*']  # ← Pour le développement, autoriser tout
 
+
+# 🔐 Corrige la boucle de redirection HTTPS
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+SECURE_SSL_REDIRECT = False
+
+# 🍪 Autoriser les cookies sur HTTPS
+CSRF_TRUSTED_ORIGINS = [
+    "https://competent-shina-buxium-7e607554.koyeb.app",
+]
+
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
+
 # CORS Configuration COMPLÈTE
 CORS_ALLOW_ALL_ORIGINS = False  # ← True en développement
 CORS_ALLOW_CREDENTIALS = True
@@ -30,9 +43,7 @@ CORS_ALLOWED_ORIGINS = [
 CORS_ALLOWED_ORIGINS = [
     "https://buxium-frontend.koyeb.app",
 ]
-CSRF_TRUSTED_ORIGINS = [
-    "https://buxium-frontend.koyeb.app",
-]
+
 
 CORS_ALLOW_METHODS = [
     'DELETE',
