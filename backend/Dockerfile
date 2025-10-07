@@ -17,13 +17,16 @@ COPY backend/requirements.txt .
 RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
 # Copier le reste du code du backend
-COPY . .
+COPY backend/ /app/backend/
 
 # Créer les répertoires nécessaires pour les fichiers statiques et médias
-RUN mkdir -p staticfiles media
+RUN mkdir -p /app/backend/staticfiles /app/backend/media
 
 # Exposer le port 8000
 EXPOSE 8000
 
-# Commande par défaut : exécuter Gunicorn
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "backend.backend.wsgi:application"]
+# Définir le PYTHONPATH pour que Django trouve les apps
+ENV PYTHONPATH=/app/backend
+
+# Commande par défaut : exécuter Gunicorn depuis le dossier correct
+CMD ["gunicorn", "--chdir", "/app/backend", "--bind", "0.0.0.0:8000", "backend.wsgi:application", "--workers", "2"]
