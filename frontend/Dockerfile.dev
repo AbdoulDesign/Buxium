@@ -1,12 +1,16 @@
-FROM node:20-alpine  # ← Version 20 LTS au lieu de 22
+# Étape 1 : Build du frontend
+FROM node:20-alpine AS build
 
 WORKDIR /app
-
 COPY package*.json ./
 RUN npm ci --silent
-
 COPY . .
+RUN npm run build
 
-EXPOSE 5174
+# Étape 2 : Servir les fichiers statiques via Nginx
+FROM nginx:stable-alpine
+COPY --from=build /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5174"]
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
