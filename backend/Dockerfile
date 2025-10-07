@@ -6,17 +6,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev gcc && rm -rf /var/lib/apt/lists/*
 
 # ---- Étape 3 : définir le dossier de travail ----
-WORKDIR /app
+WORKDIR /app/backend
 
 # ---- Étape 4 : copier les dépendances ----
-COPY requirements.txt .
+COPY backend/requirements.txt .
 RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
 # ---- Étape 5 : copier tout le code ----
-COPY backend/ .
+COPY backend/backend .
 
 # ---- Étape 6 : exposer le port ----
 EXPOSE 8000
 
 # ---- Étape 7 : lancer gunicorn ----
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "backend.wsgi:application"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "backend.backend.wsgi:application"]
