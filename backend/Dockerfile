@@ -1,4 +1,4 @@
-FROM python:3.10-slim  # ← Version slim standard
+FROM python:3.10-slim
 
 WORKDIR /app
 
