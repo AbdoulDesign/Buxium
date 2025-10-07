@@ -6,14 +6,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev gcc && rm -rf /var/lib/apt/lists/*
 
 # ---- Étape 3 : définir le dossier de travail ----
-WORKDIR /app/backend
+WORKDIR /app
 
 # ---- Étape 4 : copier les dépendances ----
 COPY backend/requirements.txt .
 RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
 # ---- Étape 5 : copier tout le code ----
-COPY backend/backend .
+COPY backend/ .
 
 # ---- Étape 6 : exposer le port ----
 EXPOSE 8000
