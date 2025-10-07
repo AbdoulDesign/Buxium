@@ -14,9 +14,9 @@ DEBUG = os.getenv("DEBUG", "False").lower() in ["true", "1", "yes"]
 ALLOWED_HOSTS = ['*']  # ← Pour le développement, autoriser tout
 
 # CORS Configuration COMPLÈTE
-CORS_ALLOW_ALL_ORIGINS = True  # ← True en développement
+CORS_ALLOW_ALL_ORIGINS = False  # ← True en développement
 CORS_ALLOW_CREDENTIALS = True
-
+"""
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5174",
     "http://127.0.0.1:5174", 
@@ -24,6 +24,14 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:8080",
     "http://127.0.0.1:8080",
     "http://nginx:80",
+]
+"""
+
+CORS_ALLOWED_ORIGINS = [
+    "https://buxium-frontend.koyeb.app",
+]
+CSRF_TRUSTED_ORIGINS = [
+    "https://buxium-frontend.koyeb.app",
 ]
 
 CORS_ALLOW_METHODS = [
@@ -46,14 +54,14 @@ CORS_ALLOW_HEADERS = [
     'x-csrftoken',
     'x-requested-with',
 ]
-
+"""
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:5174",
     "http://127.0.0.1:5174",
     "http://localhost:8080", 
     "http://127.0.0.1:8080",
 ]
-
+"""
 # Application definition
 INSTALLED_APPS = [
     'django.contrib.admin',
